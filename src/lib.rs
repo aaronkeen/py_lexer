@@ -1,46 +1,80 @@
+use std::iter::Peekable;
+
 pub struct Lexer<'a>
 {
-   peek: Option<char>,
    indent_stack: Vec<u32>,
    line_number: u32,
-   chars: &'a mut Iterator<Item=char>
+   char_number: u32,
+   chars: Peekable<&'a mut Iterator<Item=char>>
 }
 
 impl <'a> Lexer<'a>
 {
    fn new(chars: &'a mut Iterator<Item=char>) -> Self
    {
-      Lexer{peek: chars.next(),
-         indent_stack: vec![],
+      Lexer{indent_stack: vec![],
          line_number: 1,
-         chars: chars}
+         char_number: 1,
+         chars: chars.peekable()}
    }
 
    fn next_token(&mut self) -> Option<(u32, String)>
    {
-      if Lexer::is_xid_start(self.peek.unwrap())
+      match self.chars.peek()
       {
-         Some(self.build_identifier())
-      }
-      else
-      {
-         None
+         Some(&c) if Lexer::is_xid_start(c) =>
+            {
+               let result = self.build_identifier();
+               self.consume_space_to_next();
+               Some(result)
+            },
+         Some(&c) if Lexer::is_newline(c) => Some(self.build_newline()),
+         _ => None
       }
    }
 
    fn build_identifier(&mut self) -> (u32, String)
    {
       let mut token = String::new();
-      token.push(self.peek.unwrap());
-      self.peek = self.chars.next();
+      token.push(self.chars.next().unwrap());
 
-      while self.peek.is_some() && Lexer::is_xid_continue(self.peek.unwrap())
+      self.char_number += 1;
+
+      while self.chars.peek().is_some() &&
+         Lexer::is_xid_continue(*self.chars.peek().unwrap())
       {
-         token.push(self.peek.unwrap());
-         self.peek = self.chars.next();
+         token.push(self.chars.next().unwrap());
+         self.char_number += 1;
       }
 
-      (0, token)
+      (self.line_number, token)
+   }
+
+   fn build_newline(&mut self) -> (u32, String)
+   {
+      let c = self.chars.next().unwrap();
+
+      if c == '\r' && self.chars.peek().is_some() &&
+         *self.chars.peek().unwrap() == '\n'
+      {
+         self.chars.next();
+      }
+
+      let line_number = self.line_number;
+      self.line_number += 1;
+      self.char_number = 0;
+
+      (line_number, "newline".to_string())
+   }
+
+   fn consume_space_to_next(&mut self)
+   {
+      while self.chars.peek().is_some() &&
+         Lexer::is_space_between(*self.chars.peek().unwrap())
+      {
+         self.chars.next();
+         self.char_number += 1;
+      }
    }
 
 
@@ -57,6 +91,16 @@ impl <'a> Lexer<'a>
    {
       c.is_alphanumeric() || c == '_'
    }
+
+   fn is_space_between(c: char) -> bool
+   {
+      c == ' ' || c == '\t' || c == '\x0C'
+   }
+
+   fn is_newline(c: char) -> bool
+   {
+      c == '\r' || c == '\n'
+   }
 }
 
 impl <'a> Iterator for Lexer<'a>
@@ -65,7 +109,7 @@ impl <'a> Iterator for Lexer<'a>
 
    fn next(&mut self) -> Option<Self::Item>
    {
-      match self.peek
+      match self.chars.peek()
       {
          None => None,
          Some(_) => self.next_token()
@@ -84,16 +128,20 @@ mod tests
       let chars: &mut Iterator<Item=char> = &mut "abcdef 123".chars();
       let l = Lexer::new(chars);
       assert_eq!(l.chars.collect::<Vec<char>>(),
-         vec!['b', 'c', 'd', 'e', 'f', ' ', '1', '2', '3']);
+         vec!['a', 'b', 'c', 'd', 'e', 'f', ' ', '1', '2', '3']);
    }   
 
    #[test]
    fn test_identifiers()
    {
-      let chars = &mut "abf\n12\r\n3\r23\n".chars() as
+      let chars = &mut "abf  \x0C xyz 	e2f  \rmq3\n12\r\n3\r23\n".chars() as
          &mut Iterator<Item=char>;
-      let mut l = Lexer::new(chars).map(|(_,i)| i);
-      assert_eq!(l.next().as_ref().map(|s| &s[..]), Some("abf"));
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "abf")));
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "xyz")));
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "e2f")));
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "newline")));
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((2, "mq3")));
    }   
 
    #[test]
