@@ -1,18 +1,15 @@
-use std::str::Chars;
-
 pub struct Lexer<'a>
 {
    peek: Option<char>,
    indent_stack: Vec<u32>,
    line_number: u32,
-   chars: Chars<'a>
+   chars: &'a mut Iterator<Item=char>
 }
 
 impl <'a> Lexer<'a>
 {
-   fn new(str: &'a str) -> Self
+   fn new(chars: &'a mut Iterator<Item=char>) -> Self
    {
-      let mut chars = str.chars();
       Lexer{peek: chars.next(),
          indent_stack: vec![],
          line_number: 1,
@@ -84,7 +81,8 @@ mod tests
    #[test]
    fn test_creation()
    {
-      let l = Lexer::new("abcdef 123");
+      let chars: &mut Iterator<Item=char> = &mut "abcdef 123".chars();
+      let l = Lexer::new(chars);
       assert_eq!(l.chars.collect::<Vec<char>>(),
          vec!['b', 'c', 'd', 'e', 'f', ' ', '1', '2', '3']);
    }   
@@ -92,14 +90,18 @@ mod tests
    #[test]
    fn test_identifiers()
    {
-      let mut l = Lexer::new("abf\n12\r\n3\r23\n").map(|(_,i)| i);
+      let chars = &mut "abf\n12\r\n3\r23\n".chars() as
+         &mut Iterator<Item=char>;
+      let mut l = Lexer::new(chars).map(|(_,i)| i);
       assert_eq!(l.next().as_ref().map(|s| &s[..]), Some("abf"));
    }   
 
    #[test]
    fn test_line_numbers()
    {
-      let mut l = Lexer::new("abf\n12\r\n3\r23\n").map(|(n,_)| n);
+      let chars = &mut "abf\n12\r\n3\r23\n".chars() as
+         &mut Iterator<Item=char>;
+      let mut l = Lexer::new(chars).map(|(n,_)| n);
       assert_eq!(l.next(), Some(1));
       assert_eq!(l.next(), Some(1));
       assert_eq!(l.next(), Some(1));
