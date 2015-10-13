@@ -1,23 +1,48 @@
-use std::iter::Peekable;
+use std::str::{Chars, LinesAny};
+use std::iter::{Peekable, Enumerate, Map};
+
+const TAB_STOP_SIZE: u32 = 8;
 
 pub struct Lexer<'a>
 {
    indent_stack: Vec<u32>,
-   line_number: u32,
-   char_number: u32,
-   chars: Peekable<&'a mut Iterator<Item=char>>
+   lines: Box<Iterator<Item=Line<'a>> + 'a>
+}
+
+struct Line<'a>
+{
+   number: usize,
+   indentation: u32,
+   chars: Peekable<Chars<'a>>
+}
+
+impl <'a> Line<'a>
+{
+   fn new<'b>(number: usize, indentation: u32, chars: Peekable<Chars<'b>>)
+      -> Line<'b>
+   {
+      Line {number: number, indentation: indentation, chars: chars}
+   }
 }
 
 impl <'a> Lexer<'a>
 {
-   fn new(chars: &'a mut Iterator<Item=char>) -> Self
+   fn new<'b, I>(lines: I) -> Lexer<'b>
+      where I: Iterator<Item=&'b str> + 'b
    {
+      let iter = lines
+         .enumerate()
+         .map(|(n, line)| (n, line.chars().peekable()))
+         .map(|(n, mut chars)|
+            Line::new(n, count_indentation(&mut chars), chars));
+      ;
+
       Lexer{indent_stack: vec![],
-         line_number: 1,
-         char_number: 1,
-         chars: chars.peekable()}
+         lines: Box::new(iter)
+      }
    }
 
+/*
    fn next_token(&mut self) -> Option<(u32, String)>
    {
       match self.chars.peek()
@@ -101,8 +126,10 @@ impl <'a> Lexer<'a>
    {
       c == '\r' || c == '\n'
    }
+*/
 }
 
+/*
 impl <'a> Iterator for Lexer<'a>
 {
    type Item = (u32, String);
@@ -116,6 +143,52 @@ impl <'a> Iterator for Lexer<'a>
       }
    }
 }
+*/
+
+fn determine_spaces(char_count: u32, tab_stop_size: u32) -> u32
+{
+   tab_stop_size - char_count % tab_stop_size
+}
+
+fn is_space(c: char) -> bool
+{
+   c == ' ' || c == '\t' || c == '\x0C'
+}
+
+fn process_character(count: u32, c: char) -> u32
+{
+   if c == '\t'
+   {
+      count + determine_spaces(count, TAB_STOP_SIZE)
+   }
+   else
+   {
+      count + 1
+   }
+}
+
+fn count_indentation(chars: &mut Peekable<Chars>) -> u32
+{
+   let mut count = 0;
+
+   while let Some(&c) = chars.peek()
+   {
+      if is_space(c)
+      {
+         count = process_character(count, c);
+         chars.next();
+      }
+      else
+      {
+         break;
+      }
+   }
+
+   count
+}
+
+
+/*
 
 #[cfg(test)]
 mod tests
@@ -163,3 +236,4 @@ mod tests
       assert_eq!(l.next(), Some(4));
    }   
 }
+*/
