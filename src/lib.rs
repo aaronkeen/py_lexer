@@ -1,3 +1,6 @@
+/// It should be noted that indentation checks do not verify that mixed
+/// spaces and tabs do not depend on the size of a tab stop for correctness.
+///
 use std::str::{Chars};
 use std::iter::{Peekable};
 
@@ -32,7 +35,7 @@ impl <'a> Lexer<'a>
    fn new<'b, I>(lines: I) -> Lexer<'b>
       where I: Iterator<Item=&'b str> + 'b
    {
-      let mut iter = (1..).zip(lines)
+      let iter = (1..).zip(lines)
          .map(|(n, line)| (n, line.chars().peekable()))
          .map(|(n, mut chars)|
             Line::new(n, count_indentation(&mut chars), chars));
@@ -276,10 +279,10 @@ mod tests
    #[test]
    fn test_identifiers()
    {
-      let chars = &mut "abf  \x0C xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25\n";
+      let chars = &mut "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "abf")));
-      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "xyz")));
+      assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "_xyz")));
       assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((1, "*newline*")));
       assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((3, "** INDENT **")));
       assert_eq!(l.next().as_ref().map(|p| (p.0, &p.1[..])), Some((3, "e2f")));
