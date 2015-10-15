@@ -72,7 +72,7 @@ impl <'a> Lexer<'a>
             match current_line.chars.peek()
             {
                Some(&'#') =>
-                  self.consume_comment(current_line),
+                  self.process_newline(current_line),
                Some(&c) if is_xid_start(c) =>
                   self.process_identifier(current_line),
                Some(&c) if c.is_digit(10) || c == '.' =>
@@ -101,14 +101,6 @@ impl <'a> Lexer<'a>
    {
       let result = self.build_identifier(&mut current_line);
       (Some(result), Some(current_line))
-   }
-
-   fn consume_comment(&mut self, mut line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      for _ in &mut line.chars
-      { }
-      self.next_token_line(Some(line))
    }
 
    fn build_identifier(&self, line: &mut Line<'a>)
