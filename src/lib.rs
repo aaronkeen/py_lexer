@@ -127,16 +127,13 @@ impl <'a> Lexer<'a>
       }
       else if first == '.'
       {
-         let result =
-            self.build_point_float(Ok(String::new()), line);
-         let result = self.build_exp_float(result, line);
+         let result = self.build_float_part(Ok(String::new()), line);
          (line.number, result)
       }
       else
       {
          let result = self.build_decimal_number(line);
-         let result = self.build_point_float(result, line);
-         let result = self.build_exp_float(result, line);
+         let result = self.build_float_part(result, line);
 
          (line.number, result)
       }
@@ -215,6 +212,7 @@ impl <'a> Lexer<'a>
    {
       let result = self.build_point_float(rtoken, line);
       let result = self.build_exp_float(result, line);
+      let result = self.build_img_float(result, line);
       result
    }
 
@@ -226,8 +224,10 @@ impl <'a> Lexer<'a>
       {
          let first = line.chars.peek();
          float_part = first.is_some() &&
-            (*first.unwrap() == '.' || *first.unwrap() == 'e'
-            || *first.unwrap() == 'E');
+            (*first.unwrap() == '.'
+            || *first.unwrap() == 'e' || *first.unwrap() == 'E'
+            || *first.unwrap() == 'j' || *first.unwrap() == 'J'
+            );
       }
 
       if !float_part
@@ -236,9 +236,7 @@ impl <'a> Lexer<'a>
       }
       else
       {
-         let result = self.build_point_float(Ok(token), line);
-         let result = self.build_exp_float(result, line);
-         result
+         self.build_float_part(Ok(token), line)
       }
    }
 
@@ -297,6 +295,28 @@ impl <'a> Lexer<'a>
       }
 
       self.require_radix_digits(token, line, 10)
+   }
+
+   fn build_img_float(&self, rtoken: ResultToken, line: &mut Line<'a>)
+      -> ResultToken
+   {
+      if rtoken.is_err()
+      {
+         return rtoken;
+      }
+
+      if line.chars.peek().is_none() ||
+         (*line.chars.peek().unwrap() != 'j' &&
+         *line.chars.peek().unwrap() != 'J')
+      {
+         return rtoken;
+      }
+
+      let mut token = rtoken.ok().unwrap();
+
+      token.push(line.chars.next().unwrap()); // consume the j|J
+
+      Ok(token)
    }
 
    fn consume_space_to_next(&self, current_line: &mut Line)
@@ -518,8 +538,9 @@ mod tests
    #[test]
    fn test_numbers()
    {
-      let chars = &mut "123 456 45 23.742 23. 12..3 .14 0123.2192 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x\n";
+      let chars = &mut "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j\n";
       let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok("1".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("123".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("456".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("45".to_string()))));
@@ -529,6 +550,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(".3".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(".14".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0123.2192".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("077e010".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12e17".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12e+17".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12E-17".to_string()))));
@@ -539,6 +561,13 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok("0X32facb7".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0b10101010".to_string()))));
       assert_eq!(l.next(), Some((1, Err("** Missing digits: 0x".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("00000e+00000".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("79228162514264337593543950336".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("0xdeadbeef".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("037j".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("2.3j".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("2.j".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(".3j".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("*newline*".to_string()))));
    }   
 
