@@ -263,6 +263,10 @@ impl <'a> Lexer<'a>
       {
          token = self.consume_and_while(token, line, |c| c.is_digit(10));
       }
+      else if token == "."
+      {
+         token = "DOT".to_string();
+      }
 
       Ok(token)
    }
@@ -538,7 +542,7 @@ mod tests
    #[test]
    fn test_numbers()
    {
-      let chars = &mut "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j\n";
+      let chars = &mut "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . \n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("1".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("123".to_string()))));
@@ -568,6 +572,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok("2.3j".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("2.j".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(".3j".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("DOT".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("*newline*".to_string()))));
    }   
 
