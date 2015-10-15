@@ -8,6 +8,39 @@ const TAB_STOP_SIZE: u32 = 8;
 
 pub type ResultToken = Result<String, String>;
 
+enum InSequence<T>
+{
+   In(T),
+   Out(T)
+}
+
+impl <T> InSequence<T>
+{
+   fn new(t: T) -> Self
+   {
+      InSequence::In(t)
+   }
+
+   fn and_then<F>(self, f: F) -> Self
+      where F: FnOnce(T) -> InSequence<T>
+   {
+      match self
+      {
+         InSequence::In(t) => f(t),
+         InSequence::Out(t) => InSequence::Out(t)
+      }
+   }
+
+   fn unwrap(self) -> T
+   {
+      match self
+      {
+         InSequence::In(t) => t,
+         InSequence::Out(t) => t,
+      }
+   }
+}
+
 pub struct Lexer<'a>
 {
    indent_stack: Vec<u32>,
@@ -79,7 +112,8 @@ impl <'a> Lexer<'a>
                   self.process_number(current_line),
                Some(&'\\') =>
                   self.process_line_join(current_line),
-               Some(_) => (None, Some(current_line)),
+               Some(_) =>
+                  self.process_symbols(current_line),
                None =>
                   self.process_newline(current_line),
             }
@@ -325,6 +359,59 @@ impl <'a> Lexer<'a>
       Ok(token)
    }
 
+   fn process_symbols(&self, mut line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      let result = self.build_symbol(&mut line);
+      (Some(result), Some(line))
+   }
+
+   fn build_symbol(&self, line: &mut Line<'a>)
+      -> (usize, ResultToken)
+   {
+      let result =
+         match line.chars.peek()
+         {
+            Some(&'(') => self.match_one(line, '('),
+            Some(&')') => self.match_one(line, ')'),
+            Some(&'[') => self.match_one(line, '['),
+            Some(&']') => self.match_one(line, ']'),
+            Some(&'{') => self.match_one(line, '{'),
+            Some(&'}') => self.match_one(line, '}'),
+            Some(&',') => self.match_one(line, ','),
+            Some(&':') => self.match_one(line, ':'),
+            Some(&';') => self.match_one(line, ';'),
+            Some(&'=') => InSequence::new(String::new())
+               .and_then(|t| self.match_seq(t, line, '='))
+               .and_then(|t| self.match_seq(t, line, '='))
+               .unwrap(),
+            _ => "**Symbol not ready".to_string()
+         };
+
+      (line.number, Ok(result))
+   }
+
+   fn match_one(&self, line: &mut Line<'a>, c: char)
+      -> String
+   {
+      line.chars.next();
+      c.to_string()
+   }
+
+   fn match_seq(&self, mut token: String, line: &mut Line<'a>, c: char)
+      -> InSequence<String>
+   {
+      if line.chars.peek().is_some() && *line.chars.peek().unwrap() == c
+      {
+         token.push(line.chars.next().unwrap());
+         InSequence::In(token)
+      }
+      else
+      {
+         InSequence::Out(token)
+      }
+   }
+
    fn consume_space_to_next(&self, current_line: &mut Line)
    {
       while current_line.chars.peek().is_some() &&
@@ -511,7 +598,7 @@ mod tests
    #[test]
    fn test_identifiers()
    {
-      let chars = &mut "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
+      let chars = "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("abf".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("_xyz".to_string()))));
@@ -544,7 +631,7 @@ mod tests
    #[test]
    fn test_numbers()
    {
-      let chars = &mut "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . \n";
+      let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . \n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("1".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("123".to_string()))));
@@ -581,7 +668,7 @@ mod tests
    #[test]
    fn test_dedent()
    {
-      let chars = &mut "    abf xyz\n\n\n\n        e2f\n             n12\n  n2\n";
+      let chars = "    abf xyz\n\n\n\n        e2f\n             n12\n  n2\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("** INDENT **".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("abf".to_string()))));
@@ -598,5 +685,59 @@ mod tests
       assert_eq!(l.next(), Some((7, Ok("** DEDENT ERROR **".to_string()))));
       assert_eq!(l.next(), Some((7, Ok("n2".to_string()))));
       assert_eq!(l.next(), Some((7, Ok("*newline*".to_string()))));
+   }   
+
+   #[test]
+   fn test_symbols()
+   {
+      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=...";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok("(".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(")".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("{".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("}".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("[".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("]".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(":".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(",".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("DOT".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(";".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("==".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("@".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("->".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("+=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("*=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("/=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("//=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("%=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("@=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("&=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("|=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("^=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(">>=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("<<=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("**=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("+".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("-".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("**".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("*".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("//".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("/".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("%".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("@".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("<<".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(">>".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("&".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("|".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("^".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("~".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("<".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(">".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("<=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(">=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("==".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("!=".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("...".to_string()))));
    }   
 }
