@@ -71,6 +71,8 @@ impl <'a> Lexer<'a>
             self.consume_space_to_next(&mut current_line);
             match current_line.chars.peek()
             {
+               Some(&'#') =>
+                  self.consume_comment(current_line),
                Some(&c) if is_xid_start(c) =>
                   self.process_identifier(current_line),
                Some(&c) if c.is_digit(10) || c == '.' =>
@@ -101,11 +103,19 @@ impl <'a> Lexer<'a>
       (Some(result), Some(current_line))
    }
 
+   fn consume_comment(&mut self, mut line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      for _ in &mut line.chars
+      { }
+      self.next_token_line(Some(line))
+   }
+
    fn build_identifier(&self, line: &mut Line<'a>)
       -> (usize, ResultToken)
    {
-      let mut token = String::new();
-      token = self.consume_and_while(token, line, |c| is_xid_continue(c));
+      let token =
+         self.consume_and_while(String::new(), line, |c| is_xid_continue(c));
       (line.number, Ok(token))
    }
 
@@ -509,7 +519,7 @@ mod tests
    #[test]
    fn test_identifiers()
    {
-      let chars = &mut "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25\n";
+      let chars = &mut "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("abf".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("_xyz".to_string()))));
