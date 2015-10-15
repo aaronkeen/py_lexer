@@ -75,7 +75,7 @@ impl <'a> Lexer<'a>
                   self.process_identifier(current_line),
                Some(&c) if c.is_digit(10) || c == '.' =>
                   self.process_number(current_line),
-               Some(&c) if c == '\\' =>
+               Some(&'\\') =>
                   self.process_line_join(current_line),
                Some(_) => (None, Some(current_line)),
                None =>
@@ -101,19 +101,12 @@ impl <'a> Lexer<'a>
       (Some(result), Some(current_line))
    }
 
-   fn build_identifier(&self, current_line: &mut Line)
+   fn build_identifier(&self, line: &mut Line<'a>)
       -> (usize, ResultToken)
    {
       let mut token = String::new();
-      token.push(current_line.chars.next().unwrap());
-
-      while current_line.chars.peek().is_some() &&
-         is_xid_continue(*current_line.chars.peek().unwrap())
-      {
-         token.push(current_line.chars.next().unwrap());
-      }
-
-      (current_line.number, Ok(token))
+      token = self.consume_and_while(token, line, |c| is_xid_continue(c));
+      (line.number, Ok(token))
    }
 
    fn process_number(&self, mut current_line: Line<'a>)
@@ -136,14 +129,14 @@ impl <'a> Lexer<'a>
       {
          let result =
             self.build_point_float(Ok(String::new()), line);
-         //let result = self.build_exp_float(result, line);
+         let result = self.build_exp_float(result, line);
          (line.number, result)
       }
       else
       {
          let result = self.build_decimal_number(line);
          let result = self.build_point_float(result, line);
-         //let result = self.build_exp_float(result, line);
+         let result = self.build_exp_float(result, line);
 
          (line.number, result)
       }
@@ -152,23 +145,101 @@ impl <'a> Lexer<'a>
    fn build_decimal_number(&self, line: &mut Line<'a>)
       -> ResultToken
    {
-      let mut token = String::new();
-
-      token.push(line.chars.next().unwrap());
-
-      while line.chars.peek().is_some() &&
-         line.chars.peek().unwrap().is_digit(10)
-      {
-         token.push(line.chars.next().unwrap());
-      }
-
+      let token = String::new();
+      let token = self.consume_and_while(token, line, |c| c.is_digit(10));
       Ok(token)
    }
 
    fn build_zero_prefixed_number(&self, line: &mut Line<'a>)
       -> ResultToken
    {
+      let mut token = String::new();
 
+      token.push(line.chars.next().unwrap());
+
+      match line.chars.peek()
+      {
+         Some(&'o') | Some(&'O') =>
+            {
+               token.push(line.chars.next().unwrap());
+               self.require_radix_digits(token, line, 8)
+            }
+         Some(&'x') | Some(&'X') =>
+            {
+               token.push(line.chars.next().unwrap());
+               self.require_radix_digits(token, line, 16)
+            }
+         Some(&'b') | Some(&'B') =>
+            {
+               token.push(line.chars.next().unwrap());
+               self.require_radix_digits(token, line, 2)
+            }
+         Some(&'0') => 
+            {
+               token = self.consume_and_while(token, line, |c| c.is_digit(1));
+               if line.chars.peek().is_some() &&
+                  line.chars.peek().unwrap().is_digit(10)
+               {
+                  token = self.consume_and_while(token, line,
+                     |c| c.is_digit(10));
+                  self.require_float_part(token, line)
+               }
+               else
+               {
+                  self.build_float_part(Ok(token), line)
+               }
+            }
+         Some(&c) if c.is_digit(10) =>
+            {
+               token = self.consume_and_while(token, line, |c| c.is_digit(10));
+               self.require_float_part(token, line)
+            }
+         _ => Ok(token),
+      }
+   }
+
+   fn require_radix_digits(&self, token: String, line: &mut Line<'a>,
+      radix: u32)
+      -> ResultToken
+   {
+      match line.chars.peek()
+      {
+         Some(&c) if c.is_digit(radix) =>
+            Ok(self.consume_and_while(token, line, |c| c.is_digit(radix))),
+         _ => Err("** Missing digits: ".to_string() + &token)
+      }
+   }
+
+   fn build_float_part(&self, rtoken: ResultToken, line: &mut Line<'a>)
+      -> ResultToken
+   {
+      let result = self.build_point_float(rtoken, line);
+      let result = self.build_exp_float(result, line);
+      result
+   }
+
+   fn require_float_part(&self, token: String, line: &mut Line<'a>)
+      -> ResultToken
+   {
+      let float_part;
+
+      {
+         let first = line.chars.peek();
+         float_part = first.is_some() &&
+            (*first.unwrap() == '.' || *first.unwrap() == 'e'
+            || *first.unwrap() == 'E');
+      }
+
+      if !float_part
+      {
+         Err("** missing float part: ".to_string() + &token)
+      }
+      else
+      {
+         let result = self.build_point_float(Ok(token), line);
+         let result = self.build_exp_float(result, line);
+         result
+      }
    }
 
    fn build_point_float(&self, rtoken: ResultToken, line: &mut Line<'a>)
@@ -192,18 +263,40 @@ impl <'a> Lexer<'a>
       if line.chars.peek().is_some() &&
          line.chars.peek().unwrap().is_digit(10)
       {
-         while line.chars.peek().is_some() &&
-            line.chars.peek().unwrap().is_digit(10)
-         {
-            token.push(line.chars.next().unwrap());
-         }
+         token = self.consume_and_while(token, line, |c| c.is_digit(10));
+      }
 
-         Ok(token)
-      }
-      else
+      Ok(token)
+   }
+
+   fn build_exp_float(&self, rtoken: ResultToken, line: &mut Line<'a>)
+      -> ResultToken
+   {
+      if rtoken.is_err()
       {
-         Err("** invalid number: ".to_string() + &token)
+         return rtoken;
       }
+
+      if line.chars.peek().is_none() ||
+         (*line.chars.peek().unwrap() != 'e' &&
+         *line.chars.peek().unwrap() != 'E')
+      {
+         return rtoken;
+      }
+
+      let mut token = rtoken.ok().unwrap();
+
+      token.push(line.chars.next().unwrap()); // consume the e|E
+
+      // plus or minus here
+      if line.chars.peek().is_some() &&
+         (*line.chars.peek().unwrap() == '+' ||
+         *line.chars.peek().unwrap() == '-')
+      {
+         token.push(line.chars.next().unwrap()); // consume the +|-
+      }
+
+      self.require_radix_digits(token, line, 10)
    }
 
    fn consume_space_to_next(&self, current_line: &mut Line)
@@ -213,6 +306,22 @@ impl <'a> Lexer<'a>
       {
          current_line.chars.next();
       }
+   }
+
+   fn consume_and_while<P>(&self, mut token: String, line: &mut Line<'a>,
+      predicate: P)
+      -> String
+      where P: Fn(char) -> bool
+   {
+      token.push(line.chars.next().unwrap());
+
+      while line.chars.peek().is_some() &&
+         predicate(*line.chars.peek().unwrap())
+      {
+         token.push(line.chars.next().unwrap());
+      }
+
+      token
    }
 
    fn process_line_join(&mut self, mut current_line: Line<'a>)
@@ -409,25 +518,27 @@ mod tests
    #[test]
    fn test_numbers()
    {
-      let chars = &mut "123 456 45 23.742 23. 12..3 .14 0123.2192 12e17 12e+17 12E-17 00000 00003 0o724 0X32facb7 0b10101010\n";
+      let chars = &mut "123 456 45 23.742 23. 12..3 .14 0123.2192 12e17 12e+17 12E-17 0 00000 00003 0o724 0X32facb7 0b10101010 0x\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok("123".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("456".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("45".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("23.742".to_string()))));
-      assert_eq!(l.next(), Some((1, Err("** invalid number: 23.".to_string()))));
-      assert_eq!(l.next(), Some((1, Err("** invalid number: 12.".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("23.".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("12.".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(".3".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(".14".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0123.2192".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12e17".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12e+17".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("12E-17".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok("0".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("00000".to_string()))));
-      assert_eq!(l.next(), Some((1, Err("00003".to_string()))));
+      assert_eq!(l.next(), Some((1, Err("** missing float part: 00003".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0o724".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0X32facb7".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("0b10101010".to_string()))));
+      assert_eq!(l.next(), Some((1, Err("** Missing digits: 0x".to_string()))));
       assert_eq!(l.next(), Some((1, Ok("*newline*".to_string()))));
    }   
 
