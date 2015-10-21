@@ -519,6 +519,16 @@ fn build_symbol(line: &mut Line)
                token
             }
          },
+         Some(&'!') =>
+         {
+            // consume character
+            line.chars.next();
+            match line.chars.peek()
+            {
+               Some(&'=') => match_one(line, Token::NE),
+               _ => return (line.number, Err("** Solitary '!'".to_string())),
+            }
+         }
          _ => return (line.number, Err("**Symbol not ready".to_string())),
       };
 
@@ -768,7 +778,7 @@ mod tests
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=...";
+      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
@@ -817,6 +827,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::GE))));
       assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
       assert_eq!(l.next(), Some((1, Ok(Token::NE))));
+      assert_eq!(l.next(), Some((1, Err("** Solitary '!'".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(Token::Ellipsis))));
    }   
 }
