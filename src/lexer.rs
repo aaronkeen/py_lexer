@@ -1,6 +1,8 @@
 /// It should be noted that indentation checks do not verify that mixed
 /// spaces and tabs do not depend on the size of a tab stop for correctness.
 ///
+/// Normalize error messages
+///
 use std::str::Chars;
 use std::iter::Peekable;
 
@@ -37,8 +39,7 @@ impl <T> InSequence<T>
    {
       match self
       {
-         InSequence::In(t) => t,
-         InSequence::Out(t) => t,
+         InSequence::In(t) | InSequence::Out(t) => t,
       }
    }
 }
@@ -165,8 +166,7 @@ impl <'a> Lexer<'a>
       }
       else if first == '.'
       {
-         let result = self.build_float_part(
-            Ok(Token::DecInteger(String::new())), line);
+         let result = self.build_dot_prefixed(line);
          (line.number, result)
       }
       else
@@ -175,6 +175,25 @@ impl <'a> Lexer<'a>
          let result = self.build_float_part(result, line);
 
          (line.number, result)
+      }
+   }
+
+   fn build_dot_prefixed(&self, line: &mut Line<'a>) -> ResultToken
+   {
+      let mut token_str = String::new();
+      token_str.push(line.chars.next().unwrap());
+
+      match line.chars.peek()
+      {
+         Some(&c) if c.is_digit(10) =>
+            {
+               let result = self.require_radix_digits(token_str, line, 10,
+                  |s| Token::Float(s));
+               let result = self.build_exp_float(result, line);
+               let result = self.build_img_float(result, line);
+               result
+            },
+         _ => Ok(Token::Dot)
       }
    }
 
@@ -304,8 +323,8 @@ impl <'a> Lexer<'a>
       match token
       {
          Ok(ref t) if t.is_decimal_integer() => (),
-         _ => return Err("Invalid floating point number: ".to_string() +
-            &token.ok().unwrap().number_lexeme())
+         _ => return Err(
+            format!("Invalid floating point number: {:?}", token).to_string())
       }
 
       let mut token_str = token.ok().unwrap().number_lexeme();
@@ -316,10 +335,6 @@ impl <'a> Lexer<'a>
          line.chars.peek().unwrap().is_digit(10)
       {
          self.require_radix_digits(token_str, line, 10, |s| Token::Float(s))
-      }
-      else if token_str == "."
-      {
-         Ok(Token::Dot)
       }
       else
       {
@@ -391,7 +406,7 @@ impl <'a> Lexer<'a>
 
       token_str.push(line.chars.next().unwrap()); // consume the j|J
 
-      Ok(Token::Float(token_str))
+      Ok(Token::Imaginary(token_str))
    }
 
    fn process_symbols(&self, mut line: Line<'a>)
@@ -436,7 +451,7 @@ impl <'a> Lexer<'a>
       -> InSequence<Token>
    {
       line.chars.next();
-      InSequence::In(token)
+      InSequence::new(token)
    }
 
    fn match_seq(&self, old_token: Token, matched_token: Token,
@@ -701,7 +716,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Err("** Missing digits: 0x".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(Token::Float("00000e+00000".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("79228162514264337593543950336".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("0xdeadbeef".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0xdeadbeef".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("037j".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.3j".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.j".to_string())))));
@@ -710,81 +725,80 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }   
 
-/*
    #[test]
    fn test_dedent()
    {
       let chars = "    abf xyz\n\n\n\n        e2f\n             n12\n  n2\n";
       let mut l = Lexer::new(chars.lines_any());
-      assert_eq!(l.next(), Some((1, Ok("** INDENT **".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("abf".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("xyz".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("*newline*".to_string()))));
-      assert_eq!(l.next(), Some((5, Ok("** INDENT **".to_string()))));
-      assert_eq!(l.next(), Some((5, Ok("e2f".to_string()))));
-      assert_eq!(l.next(), Some((5, Ok("*newline*".to_string()))));
-      assert_eq!(l.next(), Some((6, Ok("** INDENT **".to_string()))));
-      assert_eq!(l.next(), Some((6, Ok("n12".to_string()))));
-      assert_eq!(l.next(), Some((6, Ok("*newline*".to_string()))));
-      assert_eq!(l.next(), Some((7, Ok("** DEDENT **".to_string()))));
-      assert_eq!(l.next(), Some((7, Ok("** DEDENT **".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("xyz".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Indent))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Identifier("e2f".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Indent))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n12".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((7, Err("** DEDENT ERROR **".to_string()))));
-      assert_eq!(l.next(), Some((7, Ok("n2".to_string()))));
-      assert_eq!(l.next(), Some((7, Ok("*newline*".to_string()))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n2".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
    }   
 
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-*** ///%@<<>>&|^~<><=>===!=...";
+      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=...";
       let mut l = Lexer::new(chars.lines_any());
-      assert_eq!(l.next(), Some((1, Ok("(".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(")".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("{".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("}".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("[".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("]".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(":".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(",".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("DOT".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(";".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("==".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("@".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("->".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("+=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("*=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("/=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("//=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("%=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("@=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("&=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("|=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("^=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(">>=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("<<=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("**=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("+".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("-".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("**".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("*".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("//".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("/".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("%".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("@".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("<<".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(">>".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("&".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("|".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("^".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("~".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("<".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(">".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("<=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok(">=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("==".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("!=".to_string()))));
-      assert_eq!(l.next(), Some((1, Ok("...".to_string()))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lbrace))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Rbrace))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lbracket))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Rbracket))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Colon))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Semi))));
+      assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Assign))));
+      assert_eq!(l.next(), Some((1, Ok(Token::At))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Arrow))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignPlus))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignMinus))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignTimes))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignDivide))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignDivideFloor))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignMod))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignMatMul))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitAnd))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitOr))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitXor))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitRshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitLshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignExponent))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Minus))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Exponent))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Times))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DivideFloor))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Divide))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Mod))));
+      assert_eq!(l.next(), Some((1, Ok(Token::At))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Rshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::BitAnd))));
+      assert_eq!(l.next(), Some((1, Ok(Token::BitOr))));
+      assert_eq!(l.next(), Some((1, Ok(Token::BitXor))));
+      assert_eq!(l.next(), Some((1, Ok(Token::BitNot))));
+      assert_eq!(l.next(), Some((1, Ok(Token::LT))));
+      assert_eq!(l.next(), Some((1, Ok(Token::GT))));
+      assert_eq!(l.next(), Some((1, Ok(Token::LE))));
+      assert_eq!(l.next(), Some((1, Ok(Token::GE))));
+      assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
+      assert_eq!(l.next(), Some((1, Ok(Token::NE))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Ellipsis))));
    }   
-*/
 }
