@@ -4,8 +4,7 @@
 /// Normalize error messages
 ///
 use std::str::Chars;
-use std::iter::Peekable;
-
+use iter::DoublePeekable;
 use tokens::Token;
 
 const TAB_STOP_SIZE: u32 = 8;
@@ -24,12 +23,13 @@ struct Line<'a>
 {
    number: usize,
    indentation: u32,
-   chars: Peekable<Chars<'a>>
+   chars: DoublePeekable<Chars<'a>>
 }
 
 impl <'a> Line<'a>
 {
-   fn new<'b>(number: usize, indentation: u32, chars: Peekable<Chars<'b>>)
+   fn new<'b>(number: usize, indentation: u32,
+      chars: DoublePeekable<Chars<'b>>)
       -> Line<'b>
    {
       Line {number: number, indentation: indentation, chars: chars}
@@ -43,7 +43,7 @@ impl <'a> Lexer<'a>
       where I: Iterator<Item=&'b str> + 'b
    {
       let iter = (1..).zip(lines)
-         .map(|(n, line)| (n, line.chars().peekable()))
+         .map(|(n, line)| (n, DoublePeekable::new(line.chars())))
          .map(|(n, mut chars)|
             Line::new(n, count_indentation(&mut chars), chars));
       ;
@@ -80,8 +80,16 @@ impl <'a> Lexer<'a>
                Some(&'#') => process_newline(current_line),
                Some(&c) if is_xid_start(c) =>
                   process_identifier(current_line),
-               Some(&c) if c.is_digit(10) || c == '.' =>
-                  process_number(current_line),
+               Some(&c) if c.is_digit(10) => process_number(current_line),
+               Some(&'.') =>
+               {
+                  match current_line.chars.peek_second()
+                  {
+                     Some(&c) if c.is_digit(10) => 
+                        process_number(current_line),
+                     _ => process_symbols(current_line),
+                  }
+               }
                Some(&'\\') => self.process_line_join(current_line),
                Some(_) => process_symbols(current_line),
                None => process_newline(current_line),
@@ -117,7 +125,7 @@ impl <'a> Lexer<'a>
       }
    }
 
-   fn process_line_start(&mut self, mut newline: Line<'a>)
+   fn process_line_start(&mut self, newline: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
       if let Some(&previous_indent) = self.indent_stack.last()
@@ -238,7 +246,7 @@ fn build_dot_prefixed(line: &mut Line)
          let result = build_img_float(result, line);
          result
       },
-      _ => Ok(Token::Dot)
+      _ => Err("internal error: dot".to_string())
    }
 }
 
@@ -529,7 +537,24 @@ fn build_symbol(line: &mut Line)
                _ => return (line.number, Err("** Solitary '!'".to_string())),
             }
          }
-         _ => return (line.number, Err("**Symbol not ready".to_string())),
+         Some(&'.') =>
+         {
+            // consume character
+            line.chars.next();
+            match (line.chars.peek(), line.chars.peek_second())
+            {
+               (Some(&'.'), Some(&'.')) =>
+               {
+                  line.chars.next();
+                  line.chars.next();
+                  Token::Ellipsis
+               },
+               _ => Token::Dot,
+            }
+         }
+         Some(&c) => return (line.number,
+            Err(format!("Unrecognized symbol '{}'", c).to_string())),
+         _ => return (line.number, Err("internal error".to_string())),
       };
 
    (line.number, Ok(result))
@@ -634,7 +659,7 @@ fn process_character(count: u32, c: char)
    }
 }
 
-fn count_indentation(chars: &mut Peekable<Chars>)
+fn count_indentation(chars: &mut DoublePeekable<Chars>)
    -> u32
 {
    let mut count = 0;
@@ -778,7 +803,7 @@ mod tests
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...";
+      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
@@ -790,6 +815,8 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
       assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
       assert_eq!(l.next(), Some((1, Ok(Token::Semi))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
       assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
       assert_eq!(l.next(), Some((1, Ok(Token::Assign))));
       assert_eq!(l.next(), Some((1, Ok(Token::At))));
