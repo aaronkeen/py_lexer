@@ -11,7 +11,7 @@ pub struct DoublePeekable<I>
 impl <I> DoublePeekable<I>
    where I: Iterator
 {
-   fn new(mut iter: I)
+   pub fn new(mut iter: I)
       -> Self
    {
       let first = iter.next();
@@ -19,13 +19,13 @@ impl <I> DoublePeekable<I>
       DoublePeekable{iter: iter, first: first, second: second}
    }
 
-   fn peek_first(&self)
+   pub fn peek(&self)
       -> Option<&I::Item>
    {
       self.first.as_ref()
    }
 
-   fn peek_second(&self)
+   pub fn peek_second(&self)
       -> Option<&I::Item>
    {
       self.second.as_ref()
@@ -68,59 +68,59 @@ mod test
    {
       let mut iter = DoublePeekable::new(1..6);
       assert_eq!(2, *iter.peek_second().unwrap());
-      assert_eq!(1, *iter.peek_first().unwrap());
-      assert_eq!(1, *iter.peek_first().unwrap());
+      assert_eq!(1, *iter.peek().unwrap());
+      assert_eq!(1, *iter.peek().unwrap());
       assert_eq!(2, *iter.peek_second().unwrap());
       assert_eq!(2, *iter.peek_second().unwrap());
-      assert_eq!(1, *iter.peek_first().unwrap());
+      assert_eq!(1, *iter.peek().unwrap());
       assert_eq!(1, iter.next().unwrap());
 
       assert_eq!(3, *iter.peek_second().unwrap());
-      assert_eq!(2, *iter.peek_first().unwrap());
-      assert_eq!(2, *iter.peek_first().unwrap());
+      assert_eq!(2, *iter.peek().unwrap());
+      assert_eq!(2, *iter.peek().unwrap());
       assert_eq!(3, *iter.peek_second().unwrap());
       assert_eq!(3, *iter.peek_second().unwrap());
-      assert_eq!(2, *iter.peek_first().unwrap());
+      assert_eq!(2, *iter.peek().unwrap());
       assert_eq!(2, iter.next().unwrap());
 
       assert_eq!(4, *iter.peek_second().unwrap());
-      assert_eq!(3, *iter.peek_first().unwrap());
-      assert_eq!(3, *iter.peek_first().unwrap());
+      assert_eq!(3, *iter.peek().unwrap());
+      assert_eq!(3, *iter.peek().unwrap());
       assert_eq!(4, *iter.peek_second().unwrap());
       assert_eq!(4, *iter.peek_second().unwrap());
-      assert_eq!(3, *iter.peek_first().unwrap());
+      assert_eq!(3, *iter.peek().unwrap());
       assert_eq!(3, iter.next().unwrap());
 
       assert_eq!(5, *iter.peek_second().unwrap());
-      assert_eq!(4, *iter.peek_first().unwrap());
-      assert_eq!(4, *iter.peek_first().unwrap());
+      assert_eq!(4, *iter.peek().unwrap());
+      assert_eq!(4, *iter.peek().unwrap());
       assert_eq!(5, *iter.peek_second().unwrap());
       assert_eq!(5, *iter.peek_second().unwrap());
-      assert_eq!(4, *iter.peek_first().unwrap());
+      assert_eq!(4, *iter.peek().unwrap());
       assert_eq!(4, iter.next().unwrap());
 
       assert_eq!(None, iter.peek_second());
-      assert_eq!(5, *iter.peek_first().unwrap());
-      assert_eq!(5, *iter.peek_first().unwrap());
+      assert_eq!(5, *iter.peek().unwrap());
+      assert_eq!(5, *iter.peek().unwrap());
       assert_eq!(None, iter.peek_second());
       assert_eq!(None, iter.peek_second());
-      assert_eq!(5, *iter.peek_first().unwrap());
+      assert_eq!(5, *iter.peek().unwrap());
       assert_eq!(5, iter.next().unwrap());
 
       assert_eq!(None, iter.peek_second());
-      assert_eq!(None, iter.peek_first());
-      assert_eq!(None, iter.peek_first());
+      assert_eq!(None, iter.peek());
+      assert_eq!(None, iter.peek());
       assert_eq!(None, iter.peek_second());
       assert_eq!(None, iter.peek_second());
-      assert_eq!(None, iter.peek_first());
+      assert_eq!(None, iter.peek());
       assert_eq!(None, iter.next());
 
       assert_eq!(None, iter.peek_second());
-      assert_eq!(None, iter.peek_first());
-      assert_eq!(None, iter.peek_first());
+      assert_eq!(None, iter.peek());
+      assert_eq!(None, iter.peek());
       assert_eq!(None, iter.peek_second());
       assert_eq!(None, iter.peek_second());
-      assert_eq!(None, iter.peek_first());
+      assert_eq!(None, iter.peek());
       assert_eq!(None, iter.next());
    }
 }
