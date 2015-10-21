@@ -38,7 +38,8 @@ impl <'a> Line<'a>
 
 impl <'a> Lexer<'a>
 {
-   fn new<'b, I>(lines: I) -> Lexer<'b>
+   pub fn new<'b, I>(lines: I)
+      -> Lexer<'b>
       where I: Iterator<Item=&'b str> + 'b
    {
       let iter = (1..).zip(lines)
@@ -53,7 +54,8 @@ impl <'a> Lexer<'a>
       }
    }
 
-   fn next_token(&mut self) -> Option<(usize, ResultToken)>
+   fn next_token(&mut self)
+      -> Option<(usize, ResultToken)>
    {
       let current_line = self.current_line.take();
       let result = self.next_token_line(current_line);
@@ -72,21 +74,17 @@ impl <'a> Lexer<'a>
          }
          else
          {
-            self.consume_space_to_next(&mut current_line);
+            consume_space_to_next(&mut current_line);
             match current_line.chars.peek()
             {
-               Some(&'#') =>
-                  self.process_newline(current_line),
+               Some(&'#') => process_newline(current_line),
                Some(&c) if is_xid_start(c) =>
-                  self.process_identifier(current_line),
+                  process_identifier(current_line),
                Some(&c) if c.is_digit(10) || c == '.' =>
-                  self.process_number(current_line),
-               Some(&'\\') =>
-                  self.process_line_join(current_line),
-               Some(_) =>
-                  self.process_symbols(current_line),
-               None =>
-                  self.process_newline(current_line),
+                  process_number(current_line),
+               Some(&'\\') => self.process_line_join(current_line),
+               Some(_) => process_symbols(current_line),
+               None => process_newline(current_line),
             }
          }
       }
@@ -99,420 +97,6 @@ impl <'a> Lexer<'a>
             Some(newline) => self.process_line_start(newline)
          }
       }
-   }
-
-   fn process_identifier(&self, mut current_line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      let result = self.build_identifier(&mut current_line);
-      (Some(result), Some(current_line))
-   }
-
-   fn build_identifier(&self, line: &mut Line<'a>)
-      -> (usize, ResultToken)
-   {
-      let token = Token::Identifier(
-         self.consume_and_while(String::new(), line, |c| is_xid_continue(c)));
-      (line.number, Ok(token))
-   }
-
-   fn process_number(&self, mut current_line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      let result = self.build_number(&mut current_line);
-      (Some(result), Some(current_line))
-   }
-
-   fn build_number(&self, line: &mut Line<'a>) -> (usize, ResultToken)
-   {
-      match line.chars.peek()
-      {
-         Some(&'0') =>
-         {
-            let result = self.build_zero_prefixed_number(line);
-            (line.number, result)
-         },
-         Some(&'.') =>
-         {
-            let result = self.build_dot_prefixed(line);
-            (line.number, result)
-         },
-         _ =>
-         {
-            let result = self.build_decimal_number(line);
-            let result = self.build_float_part(result, line);
-
-            (line.number, result)
-         },
-      }
-   }
-
-   fn build_dot_prefixed(&self, line: &mut Line<'a>) -> ResultToken
-   {
-      let mut token_str = String::new();
-      token_str.push(line.chars.next().unwrap());
-
-      match line.chars.peek()
-      {
-         Some(&c) if c.is_digit(10) =>
-         {
-            let result = self.require_radix_digits(token_str, line, 10,
-               |s| Token::Float(s));
-            let result = self.build_exp_float(result, line);
-            let result = self.build_img_float(result, line);
-            result
-         },
-         _ => Ok(Token::Dot)
-      }
-   }
-
-   fn build_decimal_number(&self, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      self.require_radix_digits(String::new(), line, 10,
-         |s| Token::DecInteger(s))
-   }
-
-   fn build_zero_prefixed_number(&self, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      let mut token_str = String::new();
-
-      token_str.push(line.chars.next().unwrap());
-
-      match line.chars.peek()
-      {
-         Some(&'o') | Some(&'O') =>
-         {
-            token_str.push(line.chars.next().unwrap());
-            self.require_radix_digits(token_str, line, 8,
-               |s| Token::OctInteger(s))
-         },
-         Some(&'x') | Some(&'X') =>
-         {
-            token_str.push(line.chars.next().unwrap());
-            self.require_radix_digits(token_str, line, 16,
-               |s| Token::HexInteger(s))
-         },
-         Some(&'b') | Some(&'B') =>
-         {
-            token_str.push(line.chars.next().unwrap());
-            self.require_radix_digits(token_str, line, 2,
-               |s| Token::BinInteger(s))
-         },
-         Some(&'0') => 
-         {
-            token_str = self.consume_and_while(token_str, line,
-               |c| c.is_digit(1));
-            if line.chars.peek().is_some() &&
-               line.chars.peek().unwrap().is_digit(10)
-            {
-               let token = self.require_radix_digits(token_str, line, 10,
-                  |s| Token::DecInteger(s));
-               self.require_float_part(token, line)
-            }
-            else
-            {
-               self.build_float_part(Ok(Token::DecInteger(token_str)), line)
-            }
-         },
-         Some(&c) if c.is_digit(10) =>
-         {
-            let token = self.require_radix_digits(token_str, line, 10,
-                  |s| Token::DecInteger(s));
-            self.require_float_part(token, line)
-         },
-         _ => self.build_float_part(Ok(Token::DecInteger(token_str)), line),
-      }
-   }
-
-   fn require_radix_digits<F>(&self, token_str: String, line: &mut Line<'a>,
-      radix: u32, token_type: F)
-      -> ResultToken
-      where F: Fn(String) -> Token
-   {
-      match line.chars.peek()
-      {
-         Some(&c) if c.is_digit(radix) =>
-            Ok(token_type(self.consume_and_while(token_str, line,
-               |c| c.is_digit(radix)))),
-         _ => Err("** Missing digits: ".to_string() + &token_str)
-      }
-   }
-
-   fn build_float_part(&self, token: ResultToken, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      let result = self.build_point_float(token, line);
-      let result = self.build_exp_float(result, line);
-      let result = self.build_img_float(result, line);
-      result
-   }
-
-   fn require_float_part(&self, token: ResultToken, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      let float_part;
-
-      {
-         let first = line.chars.peek();
-         float_part = first.is_some() &&
-            (*first.unwrap() == '.'
-            || *first.unwrap() == 'e' || *first.unwrap() == 'E'
-            || *first.unwrap() == 'j' || *first.unwrap() == 'J'
-            );
-      }
-
-      if !float_part
-      {
-         Err("** missing float part: ".to_string() +
-            &token.ok().unwrap().number_lexeme())
-      }
-      else
-      {
-         self.build_float_part(token, line)
-      }
-   }
-
-   fn build_point_float(&self, token: ResultToken, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      if token.is_err()
-      {
-         return token;
-      }
-
-      if line.chars.peek().is_none() ||
-         *line.chars.peek().unwrap() != '.'
-      {
-         return token;
-      }
-
-      match token
-      {
-         Ok(ref t) if t.is_decimal_integer() => (),
-         _ => return Err(
-            format!("Invalid floating point number: {:?}", token).to_string())
-      }
-
-      let mut token_str = token.ok().unwrap().number_lexeme();
-
-      token_str.push(line.chars.next().unwrap());
-
-      if line.chars.peek().is_some() &&
-         line.chars.peek().unwrap().is_digit(10)
-      {
-         self.require_radix_digits(token_str, line, 10, |s| Token::Float(s))
-      }
-      else
-      {
-         Ok(Token::Float(token_str))
-      }
-   }
-
-   fn build_exp_float(&self, token: ResultToken, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      if token.is_err()
-      {
-         return token;
-      }
-
-      if line.chars.peek().is_none() ||
-         (*line.chars.peek().unwrap() != 'e' &&
-         *line.chars.peek().unwrap() != 'E')
-      {
-         return token;
-      }
-
-      match token
-      {
-         Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-         _ => return Err(
-            format!("Invalid floating point number: {:?}",
-               token.ok().unwrap()).to_string()),
-      }
-
-      let mut token_str = token.ok().unwrap().number_lexeme();
-
-      token_str.push(line.chars.next().unwrap()); // consume the e|E
-
-      // plus or minus here
-      if line.chars.peek().is_some() &&
-         (*line.chars.peek().unwrap() == '+' ||
-         *line.chars.peek().unwrap() == '-')
-      {
-         token_str.push(line.chars.next().unwrap()); // consume the +|-
-      }
-
-      self.require_radix_digits(token_str, line, 10, |s| Token::Float(s))
-   }
-
-   fn build_img_float(&self, token: ResultToken, line: &mut Line<'a>)
-      -> ResultToken
-   {
-      if token.is_err()
-      {
-         return token;
-      }
-
-      if line.chars.peek().is_none() ||
-         (*line.chars.peek().unwrap() != 'j' &&
-         *line.chars.peek().unwrap() != 'J')
-      {
-         return token;
-      }
-
-      match token
-      {
-         Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-         _ => return Err("Invalid imaginary number: ".to_string() +
-            &token.ok().unwrap().number_lexeme())
-      }
-
-      let mut token_str = token.ok().unwrap().number_lexeme();
-
-      token_str.push(line.chars.next().unwrap()); // consume the j|J
-
-      Ok(Token::Imaginary(token_str))
-   }
-
-   fn process_symbols(&self, mut line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      let result = self.build_symbol(&mut line);
-      (Some(result), Some(line))
-   }
-
-   fn build_symbol(&self, line: &mut Line<'a>)
-      -> (usize, ResultToken)
-   {
-      let result =
-         match line.chars.peek()
-         {
-            Some(&'(') => self.match_one(line, Token::Lparen),
-            Some(&')') => self.match_one(line, Token::Rparen),
-            Some(&'[') => self.match_one(line, Token::Lbracket),
-            Some(&']') => self.match_one(line, Token::Rbracket),
-            Some(&'{') => self.match_one(line, Token::Lbrace),
-            Some(&'}') => self.match_one(line, Token::Rbrace),
-            Some(&',') => self.match_one(line, Token::Comma),
-            Some(&':') => self.match_one(line, Token::Colon),
-            Some(&';') => self.match_one(line, Token::Semi),
-            Some(&'~') => self.match_one(line, Token::BitNot),
-            Some(&'=') => self.match_pair_opt(
-               self.match_one(line, Token::Assign), line, '=', Token::EQ),
-            Some(&'@') => self.match_pair_opt(
-               self.match_one(line, Token::At), line, '=', Token::AssignAt),
-            Some(&'%') => self.match_pair_opt(
-               self.match_one(line, Token::Mod), line, '=', Token::AssignMod),
-            Some(&'&') => self.match_pair_opt(
-               self.match_one(line, Token::BitAnd), line, '=',
-               Token::AssignBitAnd),
-            Some(&'|') => self.match_pair_opt(
-               self.match_one(line, Token::BitOr), line, '=',
-               Token::AssignBitOr),
-            Some(&'^') => self.match_pair_opt(
-               self.match_one(line, Token::BitXor), line, '=',
-               Token::AssignBitXor),
-            Some(&'+') => self.match_pair_opt(
-               self.match_one(line, Token::Plus), line, '=',
-               Token::AssignPlus),
-            Some(&'*') =>
-            {
-               let token = self.match_one(line, Token::Times);
-               self.match_pair_eq_opt(line, token, '*', Token::Exponent)
-            },
-            Some(&'/') =>
-            {
-               let token = self.match_one(line, Token::Divide);
-               self.match_pair_eq_opt(line, token, '/', Token::DivideFloor)
-            },
-            Some(&'<') =>
-            {
-               let token = self.match_one(line, Token::LT);
-               self.match_pair_eq_opt(line, token, '<', Token::Lshift)
-            },
-            Some(&'>') =>
-            {
-               let token = self.match_one(line, Token::GT);
-               self.match_pair_eq_opt(line, token, '>', Token::Rshift)
-            },
-            Some(&'-') =>
-            {
-               let token = self.match_one(line, Token::Minus);
-               let token = self.match_pair_opt(token, line, '=',
-                  Token::AssignMinus);
-               if token == Token::Minus
-               {
-                  self.match_pair_opt(token, line, '>', Token::Arrow)
-               }
-               else
-               {
-                  token
-               }
-            },
-            _ => return (line.number, Err("**Symbol not ready".to_string())),
-         };
-
-      (line.number, Ok(result))
-   }
-
-   fn match_one(&self, line: &mut Line<'a>, tk: Token)
-      -> Token
-   {
-      line.chars.next();
-      tk
-   }
-
-   fn match_pair_opt(&self, old_token: Token, line: &mut Line<'a>,
-      c: char, matched_token: Token)
-      -> Token
-   {
-      if line.chars.peek().is_some() && *line.chars.peek().unwrap() == c
-      {
-         line.chars.next();
-         matched_token
-      }
-      else
-      {
-         old_token
-      }
-   }
-
-   fn match_pair_eq_opt(&self, line: &mut Line<'a>, initial_token: Token,
-      paired_char: char, paired_token: Token)
-      -> Token
-   {
-      let token = self.match_pair_opt(initial_token, line, paired_char,
-         paired_token);
-      let weq = token.with_equal();
-      self.match_pair_opt(token, line, '=', weq)
-   }
-
-   fn consume_space_to_next(&self, current_line: &mut Line)
-   {
-      while current_line.chars.peek().is_some() &&
-         is_space(*current_line.chars.peek().unwrap())
-      {
-         current_line.chars.next();
-      }
-   }
-
-   fn consume_and_while<P>(&self, mut token_str: String, line: &mut Line<'a>,
-      predicate: P)
-      -> String
-      where P: Fn(char) -> bool
-   {
-      token_str.push(line.chars.next().unwrap());
-
-      while line.chars.peek().is_some() &&
-         predicate(*line.chars.peek().unwrap())
-      {
-         token_str.push(line.chars.next().unwrap());
-      }
-
-      token_str
    }
 
    fn process_line_join(&mut self, mut current_line: Line<'a>)
@@ -531,12 +115,6 @@ impl <'a> Lexer<'a>
          (Some((line_number, Err("** bad \\ **".to_string()))),
             Some(current_line))
       }
-   }
-
-   fn process_newline(&self, current_line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      (Some((current_line.number, Ok(Token::Newline))), None)
    }
 
    fn process_line_start(&mut self, mut newline: Line<'a>)
@@ -592,35 +170,449 @@ impl <'a> Lexer<'a>
       else
       {
          self.dedent_count += if self.dedent_count < 0 {1} else {-1};
-         (Some((current_line.number, Ok(Token::Dedent))),
-            Some(current_line))
+         (Some((current_line.number, Ok(Token::Dedent))), Some(current_line))
       }
    }
+}
+
+fn process_identifier(mut current_line: Line)
+   -> (Option<(usize, ResultToken)>, Option<Line>)
+{
+   let result = build_identifier(&mut current_line);
+   (Some(result), Some(current_line))
+}
+
+fn build_identifier(line: &mut Line)
+   -> (usize, ResultToken)
+{
+   let token = Token::Identifier(
+      consume_and_while(String::new(), line, |c| is_xid_continue(c)));
+   (line.number, Ok(token))
+}
+
+fn process_number(mut current_line: Line)
+   -> (Option<(usize, ResultToken)>, Option<Line>)
+{
+   let result = build_number(&mut current_line);
+   (Some(result), Some(current_line))
+}
+
+fn build_number(line: &mut Line)
+   -> (usize, ResultToken)
+{
+   match line.chars.peek()
+   {
+      Some(&'0') =>
+      {
+         let result = build_zero_prefixed_number(line);
+         (line.number, result)
+      },
+      Some(&'.') =>
+      {
+         let result = build_dot_prefixed(line);
+         (line.number, result)
+      },
+      _ =>
+      {
+         let result = build_decimal_number(line);
+         let result = build_float_part(result, line);
+
+         (line.number, result)
+      },
+   }
+}
+
+fn build_dot_prefixed(line: &mut Line)
+   -> ResultToken
+{
+   let mut token_str = String::new();
+   token_str.push(line.chars.next().unwrap());
+
+   match line.chars.peek()
+   {
+      Some(&c) if c.is_digit(10) =>
+      {
+         let result = require_radix_digits(token_str, line, 10,
+            |s| Token::Float(s));
+         let result = build_exp_float(result, line);
+         let result = build_img_float(result, line);
+         result
+      },
+      _ => Ok(Token::Dot)
+   }
+}
+
+fn build_decimal_number(line: &mut Line)
+   -> ResultToken
+{
+   require_radix_digits(String::new(), line, 10, |s| Token::DecInteger(s))
+}
+
+fn build_zero_prefixed_number(line: &mut Line)
+   -> ResultToken
+{
+   let mut token_str = String::new();
+
+   token_str.push(line.chars.next().unwrap());
+
+   match line.chars.peek()
+   {
+      Some(&'o') | Some(&'O') =>
+      {
+         token_str.push(line.chars.next().unwrap());
+         require_radix_digits(token_str, line, 8, |s| Token::OctInteger(s))
+      },
+      Some(&'x') | Some(&'X') =>
+      {
+         token_str.push(line.chars.next().unwrap());
+         require_radix_digits(token_str, line, 16, |s| Token::HexInteger(s))
+      },
+      Some(&'b') | Some(&'B') =>
+      {
+         token_str.push(line.chars.next().unwrap());
+         require_radix_digits(token_str, line, 2, |s| Token::BinInteger(s))
+      },
+      Some(&'0') => 
+      {
+         token_str = consume_and_while(token_str, line,
+            |c| c.is_digit(1));
+         if line.chars.peek().is_some() &&
+            line.chars.peek().unwrap().is_digit(10)
+         {
+            let token = require_radix_digits(token_str, line, 10,
+               |s| Token::DecInteger(s));
+            require_float_part(token, line)
+         }
+         else
+         {
+            build_float_part(Ok(Token::DecInteger(token_str)), line)
+         }
+      },
+      Some(&c) if c.is_digit(10) =>
+      {
+         let token = require_radix_digits(token_str, line, 10,
+               |s| Token::DecInteger(s));
+         require_float_part(token, line)
+      },
+      _ => build_float_part(Ok(Token::DecInteger(token_str)), line),
+   }
+}
+
+fn require_radix_digits<F>(token_str: String, line: &mut Line,
+   radix: u32, token_type: F)
+   -> ResultToken
+      where F: Fn(String) -> Token
+{
+   match line.chars.peek()
+   {
+      Some(&c) if c.is_digit(radix) =>
+         Ok(token_type(consume_and_while(token_str, line,
+            |c| c.is_digit(radix)))),
+      _ => Err("** Missing digits: ".to_string() + &token_str)
+   }
+}
+
+fn build_float_part(token: ResultToken, line: &mut Line)
+   -> ResultToken
+{
+   let result = build_point_float(token, line);
+   let result = build_exp_float(result, line);
+   let result = build_img_float(result, line);
+   result
+}
+
+fn require_float_part(token: ResultToken, line: &mut Line)
+   -> ResultToken
+{
+   let float_part;
+
+   {
+      let first = line.chars.peek();
+      float_part = first.is_some() &&
+         (*first.unwrap() == '.'
+         || *first.unwrap() == 'e' || *first.unwrap() == 'E'
+         || *first.unwrap() == 'j' || *first.unwrap() == 'J'
+         );
+   }
+
+   if !float_part
+   {
+      Err("** missing float part: ".to_string() +
+         &token.ok().unwrap().number_lexeme())
+   }
+   else
+   {
+      build_float_part(token, line)
+   }
+}
+
+fn build_point_float(token: ResultToken, line: &mut Line)
+   -> ResultToken
+{
+   if token.is_err()
+   {
+      return token;
+   }
+
+   if line.chars.peek().is_none() ||
+      *line.chars.peek().unwrap() != '.'
+   {
+      return token;
+   }
+
+   match token
+   {
+      Ok(ref t) if t.is_decimal_integer() => (),
+      _ => return Err(
+         format!("Invalid floating point number: {:?}", token).to_string())
+   }
+
+   let mut token_str = token.ok().unwrap().number_lexeme();
+
+   token_str.push(line.chars.next().unwrap());
+
+   if line.chars.peek().is_some() &&
+      line.chars.peek().unwrap().is_digit(10)
+   {
+      require_radix_digits(token_str, line, 10, |s| Token::Float(s))
+   }
+   else
+   {
+      Ok(Token::Float(token_str))
+   }
+}
+
+fn build_exp_float(token: ResultToken, line: &mut Line)
+   -> ResultToken
+{
+   if token.is_err()
+   {
+      return token;
+   }
+
+   if line.chars.peek().is_none() ||
+      (*line.chars.peek().unwrap() != 'e' &&
+      *line.chars.peek().unwrap() != 'E')
+   {
+      return token;
+   }
+
+   match token
+   {
+      Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
+      _ => return Err(
+         format!("Invalid floating point number: {:?}",
+            token.ok().unwrap()).to_string()),
+   }
+
+   let mut token_str = token.ok().unwrap().number_lexeme();
+
+   token_str.push(line.chars.next().unwrap()); // consume the e|E
+
+   // plus or minus here
+   if line.chars.peek().is_some() &&
+      (*line.chars.peek().unwrap() == '+' ||
+      *line.chars.peek().unwrap() == '-')
+   {
+      token_str.push(line.chars.next().unwrap()); // consume the +|-
+   }
+
+   require_radix_digits(token_str, line, 10, |s| Token::Float(s))
+}
+
+fn build_img_float(token: ResultToken, line: &mut Line)
+   -> ResultToken
+{
+   if token.is_err()
+   {
+      return token;
+   }
+
+   if line.chars.peek().is_none() ||
+      (*line.chars.peek().unwrap() != 'j' &&
+      *line.chars.peek().unwrap() != 'J')
+   {
+      return token;
+   }
+
+   match token
+   {
+      Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
+      _ => return Err("Invalid imaginary number: ".to_string() +
+         &token.ok().unwrap().number_lexeme())
+   }
+
+   let mut token_str = token.ok().unwrap().number_lexeme();
+
+   token_str.push(line.chars.next().unwrap()); // consume the j|J
+
+   Ok(Token::Imaginary(token_str))
+}
+
+fn process_symbols(mut line: Line)
+   -> (Option<(usize, ResultToken)>, Option<Line>)
+{
+   let result = build_symbol(&mut line);
+   (Some(result), Some(line))
+}
+
+fn build_symbol(line: &mut Line)
+   -> (usize, ResultToken)
+{
+   let result =
+      match line.chars.peek()
+      {
+         Some(&'(') => match_one(line, Token::Lparen),
+         Some(&')') => match_one(line, Token::Rparen),
+         Some(&'[') => match_one(line, Token::Lbracket),
+         Some(&']') => match_one(line, Token::Rbracket),
+         Some(&'{') => match_one(line, Token::Lbrace),
+         Some(&'}') => match_one(line, Token::Rbrace),
+         Some(&',') => match_one(line, Token::Comma),
+         Some(&':') => match_one(line, Token::Colon),
+         Some(&';') => match_one(line, Token::Semi),
+         Some(&'~') => match_one(line, Token::BitNot),
+         Some(&'=') => match_pair_opt(
+            match_one(line, Token::Assign), line, '=', Token::EQ),
+         Some(&'@') => match_pair_opt(
+            match_one(line, Token::At), line, '=', Token::AssignAt),
+         Some(&'%') => match_pair_opt(
+            match_one(line, Token::Mod), line, '=', Token::AssignMod),
+         Some(&'&') => match_pair_opt(
+            match_one(line, Token::BitAnd), line, '=', Token::AssignBitAnd),
+         Some(&'|') => match_pair_opt(
+            match_one(line, Token::BitOr), line, '=', Token::AssignBitOr),
+         Some(&'^') => match_pair_opt(
+            match_one(line, Token::BitXor), line, '=', Token::AssignBitXor),
+         Some(&'+') => match_pair_opt(
+            match_one(line, Token::Plus), line, '=', Token::AssignPlus),
+         Some(&'*') =>
+         {
+            let token = match_one(line, Token::Times);
+            match_pair_eq_opt(line, token, '*', Token::Exponent)
+         },
+         Some(&'/') =>
+         {
+            let token = match_one(line, Token::Divide);
+            match_pair_eq_opt(line, token, '/', Token::DivideFloor)
+         },
+         Some(&'<') =>
+         {
+            let token = match_one(line, Token::LT);
+            match_pair_eq_opt(line, token, '<', Token::Lshift)
+         },
+         Some(&'>') =>
+         {
+            let token = match_one(line, Token::GT);
+            match_pair_eq_opt(line, token, '>', Token::Rshift)
+         },
+         Some(&'-') =>
+         {
+            let token = match_one(line, Token::Minus);
+            let token = match_pair_opt(token, line, '=', Token::AssignMinus);
+            if token == Token::Minus
+            {
+               match_pair_opt(token, line, '>', Token::Arrow)
+            }
+            else
+            {
+               token
+            }
+         },
+         _ => return (line.number, Err("**Symbol not ready".to_string())),
+      };
+
+   (line.number, Ok(result))
+}
+
+fn match_one(line: &mut Line, tk: Token)
+   -> Token
+{
+   line.chars.next();
+   tk
+}
+
+fn match_pair_opt(old_token: Token, line: &mut Line,
+   c: char, matched_token: Token)
+   -> Token
+{
+   if line.chars.peek().is_some() && *line.chars.peek().unwrap() == c
+   {
+      line.chars.next();
+      matched_token
+   }
+   else
+   {
+      old_token
+   }
+}
+
+fn match_pair_eq_opt(line: &mut Line, initial_token: Token,
+   paired_char: char, paired_token: Token)
+   -> Token
+{
+   let token = match_pair_opt(initial_token, line, paired_char, paired_token);
+   let weq = token.with_equal();
+   match_pair_opt(token, line, '=', weq)
+}
+
+fn consume_space_to_next(current_line: &mut Line)
+{
+   while current_line.chars.peek().is_some() &&
+      is_space(*current_line.chars.peek().unwrap())
+   {
+      current_line.chars.next();
+   }
+}
+
+fn process_newline(line: Line)
+   -> (Option<(usize, ResultToken)>, Option<Line>)
+{
+   (Some((line.number, Ok(Token::Newline))), None)
+}
+
+fn consume_and_while<P>(mut token_str: String, line: &mut Line, predicate: P)
+   -> String
+      where P: Fn(char) -> bool
+{
+   token_str.push(line.chars.next().unwrap());
+
+   while line.chars.peek().is_some() &&
+      predicate(*line.chars.peek().unwrap())
+   {
+      token_str.push(line.chars.next().unwrap());
+   }
+
+   token_str
 }
 
 impl <'a> Iterator for Lexer<'a>
 {
    type Item = (usize, ResultToken);
 
-   fn next(&mut self) -> Option<Self::Item>
+   fn next(&mut self)
+      -> Option<Self::Item>
    {
       self.next_token()
    }
 }
 
-fn determine_spaces(char_count: u32, tab_stop_size: u32) -> u32
+fn determine_spaces(char_count: u32, tab_stop_size: u32)
+   -> u32
 {
    tab_stop_size - char_count % tab_stop_size
 }
 
 /// This function currently considers \r as a whitespace character instead
 /// of an old Mac end of line character.
-fn is_space(c: char) -> bool
+fn is_space(c: char)
+   -> bool
 {
    c == ' ' || c == '\t' || c == '\x0C' || c == '\r' // ignore \r for now
 }
 
-fn process_character(count: u32, c: char) -> u32
+fn process_character(count: u32, c: char)
+   -> u32
 {
    if c == '\t'
    {
@@ -632,7 +624,8 @@ fn process_character(count: u32, c: char) -> u32
    }
 }
 
-fn count_indentation(chars: &mut Peekable<Chars>) -> u32
+fn count_indentation(chars: &mut Peekable<Chars>)
+   -> u32
 {
    let mut count = 0;
 
@@ -654,14 +647,16 @@ fn count_indentation(chars: &mut Peekable<Chars>) -> u32
 
 /// This function should be modified to do a more appropriate unicode
 /// check.  Eliding for now due to apparently unstable support in Rust.
-fn is_xid_start(c: char) -> bool
+fn is_xid_start(c: char)
+   -> bool
 {
    c.is_alphabetic() || c == '_'
 }
 
 /// This function should be modified to do a more appropriate unicode
 /// check.  Eliding for now due to apparently unstable support in Rust.
-fn is_xid_continue(c: char) -> bool
+fn is_xid_continue(c: char)
+   -> bool
 {
    c.is_alphanumeric() || c == '_'
 }
