@@ -12,38 +12,6 @@ const TAB_STOP_SIZE: u32 = 8;
 
 pub type ResultToken = Result<Token, String>;
 
-enum InSequence<T>
-{
-   In(T),
-   Out(T)
-}
-
-impl <T> InSequence<T>
-{
-   fn new(t: T) -> Self
-   {
-      InSequence::In(t)
-   }
-
-   fn and_then<F>(self, f: F) -> Self
-      where F: FnOnce(T) -> InSequence<T>
-   {
-      match self
-      {
-         InSequence::In(t) => f(t),
-         InSequence::Out(t) => InSequence::Out(t)
-      }
-   }
-
-   fn unwrap(self) -> T
-   {
-      match self
-      {
-         InSequence::In(t) | InSequence::Out(t) => t,
-      }
-   }
-}
-
 pub struct Lexer<'a>
 {
    indent_stack: Vec<u32>,
@@ -157,24 +125,25 @@ impl <'a> Lexer<'a>
 
    fn build_number(&self, line: &mut Line<'a>) -> (usize, ResultToken)
    {
-      let first = *line.chars.peek().unwrap();
+      match line.chars.peek()
+      {
+         Some(&'0') =>
+         {
+            let result = self.build_zero_prefixed_number(line);
+            (line.number, result)
+         },
+         Some(&'.') =>
+         {
+            let result = self.build_dot_prefixed(line);
+            (line.number, result)
+         },
+         _ =>
+         {
+            let result = self.build_decimal_number(line);
+            let result = self.build_float_part(result, line);
 
-      if first == '0'
-      {
-         let result = self.build_zero_prefixed_number(line);
-         (line.number, result)
-      }
-      else if first == '.'
-      {
-         let result = self.build_dot_prefixed(line);
-         (line.number, result)
-      }
-      else
-      {
-         let result = self.build_decimal_number(line);
-         let result = self.build_float_part(result, line);
-
-         (line.number, result)
+            (line.number, result)
+         },
       }
    }
 
@@ -186,13 +155,13 @@ impl <'a> Lexer<'a>
       match line.chars.peek()
       {
          Some(&c) if c.is_digit(10) =>
-            {
-               let result = self.require_radix_digits(token_str, line, 10,
-                  |s| Token::Float(s));
-               let result = self.build_exp_float(result, line);
-               let result = self.build_img_float(result, line);
-               result
-            },
+         {
+            let result = self.require_radix_digits(token_str, line, 10,
+               |s| Token::Float(s));
+            let result = self.build_exp_float(result, line);
+            let result = self.build_img_float(result, line);
+            result
+         },
          _ => Ok(Token::Dot)
       }
    }
@@ -214,45 +183,45 @@ impl <'a> Lexer<'a>
       match line.chars.peek()
       {
          Some(&'o') | Some(&'O') =>
-            {
-               token_str.push(line.chars.next().unwrap());
-               self.require_radix_digits(token_str, line, 8,
-                  |s| Token::OctInteger(s))
-            }
+         {
+            token_str.push(line.chars.next().unwrap());
+            self.require_radix_digits(token_str, line, 8,
+               |s| Token::OctInteger(s))
+         },
          Some(&'x') | Some(&'X') =>
-            {
-               token_str.push(line.chars.next().unwrap());
-               self.require_radix_digits(token_str, line, 16,
-                  |s| Token::HexInteger(s))
-            }
+         {
+            token_str.push(line.chars.next().unwrap());
+            self.require_radix_digits(token_str, line, 16,
+               |s| Token::HexInteger(s))
+         },
          Some(&'b') | Some(&'B') =>
-            {
-               token_str.push(line.chars.next().unwrap());
-               self.require_radix_digits(token_str, line, 2,
-                  |s| Token::BinInteger(s))
-            }
+         {
+            token_str.push(line.chars.next().unwrap());
+            self.require_radix_digits(token_str, line, 2,
+               |s| Token::BinInteger(s))
+         },
          Some(&'0') => 
-            {
-               token_str = self.consume_and_while(token_str, line,
-                  |c| c.is_digit(1));
-               if line.chars.peek().is_some() &&
-                  line.chars.peek().unwrap().is_digit(10)
-               {
-                  let token = self.require_radix_digits(token_str, line, 10,
-                     |s| Token::DecInteger(s));
-                  self.require_float_part(token, line)
-               }
-               else
-               {
-                  self.build_float_part(Ok(Token::DecInteger(token_str)), line)
-               }
-            }
-         Some(&c) if c.is_digit(10) =>
+         {
+            token_str = self.consume_and_while(token_str, line,
+               |c| c.is_digit(1));
+            if line.chars.peek().is_some() &&
+               line.chars.peek().unwrap().is_digit(10)
             {
                let token = self.require_radix_digits(token_str, line, 10,
-                     |s| Token::DecInteger(s));
+                  |s| Token::DecInteger(s));
                self.require_float_part(token, line)
             }
+            else
+            {
+               self.build_float_part(Ok(Token::DecInteger(token_str)), line)
+            }
+         },
+         Some(&c) if c.is_digit(10) =>
+         {
+            let token = self.require_radix_digits(token_str, line, 10,
+                  |s| Token::DecInteger(s));
+            self.require_float_part(token, line)
+         },
          _ => self.build_float_part(Ok(Token::DecInteger(token_str)), line),
       }
    }
@@ -265,8 +234,7 @@ impl <'a> Lexer<'a>
       match line.chars.peek()
       {
          Some(&c) if c.is_digit(radix) =>
-            Ok(token_type(
-               self.consume_and_while(token_str, line,
+            Ok(token_type(self.consume_and_while(token_str, line,
                |c| c.is_digit(radix)))),
          _ => Err("** Missing digits: ".to_string() + &token_str)
       }
@@ -431,9 +399,59 @@ impl <'a> Lexer<'a>
             Some(&',') => self.match_one(line, Token::Comma),
             Some(&':') => self.match_one(line, Token::Colon),
             Some(&';') => self.match_one(line, Token::Semi),
-            Some(&'=') => self.start_sequence(Token::Assign, line)
-                  .and_then(|t| self.match_seq(t, Token::EQ, line, '='))
-                  .unwrap(),
+            Some(&'~') => self.match_one(line, Token::BitNot),
+            Some(&'=') => self.match_pair_opt(
+               self.match_one(line, Token::Assign), line, '=', Token::EQ),
+            Some(&'@') => self.match_pair_opt(
+               self.match_one(line, Token::At), line, '=', Token::AssignAt),
+            Some(&'%') => self.match_pair_opt(
+               self.match_one(line, Token::Mod), line, '=', Token::AssignMod),
+            Some(&'&') => self.match_pair_opt(
+               self.match_one(line, Token::BitAnd), line, '=',
+               Token::AssignBitAnd),
+            Some(&'|') => self.match_pair_opt(
+               self.match_one(line, Token::BitOr), line, '=',
+               Token::AssignBitOr),
+            Some(&'^') => self.match_pair_opt(
+               self.match_one(line, Token::BitXor), line, '=',
+               Token::AssignBitXor),
+            Some(&'+') => self.match_pair_opt(
+               self.match_one(line, Token::Plus), line, '=',
+               Token::AssignPlus),
+            Some(&'*') =>
+            {
+               let token = self.match_one(line, Token::Times);
+               self.match_pair_eq_opt(line, token, '*', Token::Exponent)
+            },
+            Some(&'/') =>
+            {
+               let token = self.match_one(line, Token::Divide);
+               self.match_pair_eq_opt(line, token, '/', Token::DivideFloor)
+            },
+            Some(&'<') =>
+            {
+               let token = self.match_one(line, Token::LT);
+               self.match_pair_eq_opt(line, token, '<', Token::Lshift)
+            },
+            Some(&'>') =>
+            {
+               let token = self.match_one(line, Token::GT);
+               self.match_pair_eq_opt(line, token, '>', Token::Rshift)
+            },
+            Some(&'-') =>
+            {
+               let token = self.match_one(line, Token::Minus);
+               let token = self.match_pair_opt(token, line, '=',
+                  Token::AssignMinus);
+               if token == Token::Minus
+               {
+                  self.match_pair_opt(token, line, '>', Token::Arrow)
+               }
+               else
+               {
+                  token
+               }
+            },
             _ => return (line.number, Err("**Symbol not ready".to_string())),
          };
 
@@ -447,26 +465,29 @@ impl <'a> Lexer<'a>
       tk
    }
 
-   fn start_sequence(&self, token: Token, line: &mut Line<'a>)
-      -> InSequence<Token>
-   {
-      line.chars.next();
-      InSequence::new(token)
-   }
-
-   fn match_seq(&self, old_token: Token, matched_token: Token,
-      line: &mut Line<'a>, c: char)
-      -> InSequence<Token>
+   fn match_pair_opt(&self, old_token: Token, line: &mut Line<'a>,
+      c: char, matched_token: Token)
+      -> Token
    {
       if line.chars.peek().is_some() && *line.chars.peek().unwrap() == c
       {
          line.chars.next();
-         InSequence::In(matched_token)
+         matched_token
       }
       else
       {
-         InSequence::Out(old_token)
+         old_token
       }
+   }
+
+   fn match_pair_eq_opt(&self, line: &mut Line<'a>, initial_token: Token,
+      paired_char: char, paired_token: Token)
+      -> Token
+   {
+      let token = self.match_pair_opt(initial_token, line, paired_char,
+         paired_token);
+      let weq = token.with_equal();
+      self.match_pair_opt(token, line, '=', weq)
    }
 
    fn consume_space_to_next(&self, current_line: &mut Line)
@@ -688,7 +709,7 @@ mod tests
    #[test]
    fn test_numbers()
    {
-      let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . \n";
+      let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . 3..2\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("123".to_string())))));
@@ -722,6 +743,8 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.j".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Imaginary(".3j".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("3.".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float(".2".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }   
 
@@ -772,12 +795,12 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::AssignDivide))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignDivideFloor))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignMod))));
-      assert_eq!(l.next(), Some((1, Ok(Token::AssignMatMul))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignAt))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignBitAnd))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignBitOr))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignBitXor))));
-      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitRshift))));
-      assert_eq!(l.next(), Some((1, Ok(Token::AssignBitLshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignRshift))));
+      assert_eq!(l.next(), Some((1, Ok(Token::AssignLshift))));
       assert_eq!(l.next(), Some((1, Ok(Token::AssignExponent))));
       assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
       assert_eq!(l.next(), Some((1, Ok(Token::Minus))));

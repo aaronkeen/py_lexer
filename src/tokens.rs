@@ -1,4 +1,4 @@
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token
 {
    Newline,
@@ -76,12 +76,12 @@ pub enum Token
    AssignDivide,
    AssignDivideFloor,
    AssignMod,
-   AssignMatMul,
+   AssignAt,
    AssignBitAnd,
    AssignBitOr,
    AssignBitXor,
-   AssignBitRshift,
-   AssignBitLshift,
+   AssignRshift,
+   AssignLshift,
    AssignExponent,
    Quote,
    DoubleQuote,
@@ -123,6 +123,30 @@ impl Token
             Token::OctInteger(s) | Token::HexInteger(s) |
             Token::Float(s) | Token::Imaginary(s) => s,
          _ => panic!(format!("invalid number token: {:?}", self)),
+      }
+   }
+
+   pub fn with_equal(&self) -> Self
+   {
+      match self
+      {
+         &Token::Plus => Token::AssignPlus,
+         &Token::Minus => Token::AssignMinus,
+         &Token::Times => Token::AssignTimes,
+         &Token::Exponent => Token::AssignExponent,
+         &Token::Divide => Token::AssignDivide,
+         &Token::DivideFloor => Token::AssignDivideFloor,
+         &Token::BitAnd => Token::AssignBitAnd,
+         &Token::BitOr => Token::AssignBitOr,
+         &Token::BitXor => Token::AssignBitXor,
+         &Token::Mod => Token::AssignMod,
+         &Token::At => Token::AssignAt,
+         &Token::Assign => Token::EQ,
+         &Token::LT => Token::LE,
+         &Token::Lshift => Token::AssignLshift,
+         &Token::GT => Token::GE,
+         &Token::Rshift => Token::AssignRshift,
+         _ => self.clone()
       }
    }
 }
