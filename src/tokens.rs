@@ -95,9 +95,47 @@ pub enum Token
    Imaginary(String),
 }
 
+const KEYWORDS : [(&'static str, Token); 33] =
+   [
+      ("False", Token::False),
+      ("None", Token::None),
+      ("True", Token::True),
+      ("and", Token::And),
+      ("as", Token::As),
+      ("assert", Token::Assert),
+      ("break", Token::Break),
+      ("class", Token::Class),
+      ("continue", Token::Continue),
+      ("def", Token::Def),
+      ("del", Token::Del),
+      ("elif", Token::Elif),
+      ("else", Token::Else),
+      ("except", Token::Except),
+      ("finally", Token::Finally),
+      ("for", Token::For),
+      ("from", Token::From),
+      ("global", Token::Global),
+      ("if", Token::If),
+      ("import", Token::Import),
+      ("in", Token::In),
+      ("is", Token::Is),
+      ("lambda", Token::Lambda),
+      ("nonlocal", Token::Nonlocal),
+      ("not", Token::Not),
+      ("or", Token::Or),
+      ("pass", Token::Pass),
+      ("raise", Token::Raise),
+      ("return", Token::Return),
+      ("try", Token::Try),
+      ("while", Token::While),
+      ("with", Token::With),
+      ("yield", Token::Yield),
+   ];
+
 impl Token
 {
-   pub fn is_decimal_integer(&self) -> bool
+   pub fn is_decimal_integer(&self)
+      -> bool
    {
       match self
       {
@@ -106,7 +144,8 @@ impl Token
       }
    }
 
-   pub fn is_float(&self) -> bool
+   pub fn is_float(&self)
+      -> bool
    {
       match self
       {
@@ -115,7 +154,8 @@ impl Token
       }
    }
 
-   pub fn number_lexeme(self) -> String
+   pub fn number_lexeme(self)
+      -> String
    {
       match self
       {
@@ -126,7 +166,8 @@ impl Token
       }
    }
 
-   pub fn with_equal(&self) -> Self
+   pub fn with_equal(&self)
+      -> Self
    {
       match self
       {
@@ -149,4 +190,18 @@ impl Token
          _ => self.clone()
       }
    }
+}
+
+pub fn keyword_lookup(token_str: String)
+   -> Token
+{
+   for  &(key, ref tk) in KEYWORDS.into_iter()
+   {
+      if key == &token_str
+      {
+         return tk.clone()
+      }
+   }
+
+   return Token::Identifier(token_str)
 }

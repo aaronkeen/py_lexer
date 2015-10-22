@@ -5,7 +5,7 @@
 ///
 use std::str::Chars;
 use iter::DoublePeekable;
-use tokens::Token;
+use tokens::{Token, keyword_lookup};
 
 const TAB_STOP_SIZE: u32 = 8;
 
@@ -193,7 +193,7 @@ fn process_identifier(mut current_line: Line)
 fn build_identifier(line: &mut Line)
    -> (usize, ResultToken)
 {
-   let token = Token::Identifier(
+   let token = keyword_lookup(
       consume_and_while(String::new(), line, |c| is_xid_continue(c)));
    (line.number, Ok(token))
 }
@@ -347,6 +347,7 @@ fn require_float_part(token: ResultToken, line: &mut Line)
    {
       Err("** missing float part: ".to_string() +
          &token.ok().unwrap().number_lexeme())
+
    }
    else
    {
@@ -446,8 +447,8 @@ fn build_img_float(token: ResultToken, line: &mut Line)
    match token
    {
       Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-      _ => return Err("Invalid imaginary number: ".to_string() +
-         &token.ok().unwrap().number_lexeme())
+      _ => return Err(format!("Invalid imaginary number: {:?}", token)
+            .to_string())
    }
 
    let mut token_str = token.ok().unwrap().number_lexeme();
@@ -856,5 +857,49 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::NE))));
       assert_eq!(l.next(), Some((1, Err("** Solitary '!'".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(Token::Ellipsis))));
-   }   
+   }
+
+   #[test]
+   fn test_keywords()
+   {
+      let chars = "false False None True and as assert break class continue def del defdel elif else except finally for from \nglobal if import in is lambda nonlocal not or pass raise return try while with yield\n";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("false".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::False))));
+      assert_eq!(l.next(), Some((1, Ok(Token::None))));
+      assert_eq!(l.next(), Some((1, Ok(Token::True))));
+      assert_eq!(l.next(), Some((1, Ok(Token::And))));
+      assert_eq!(l.next(), Some((1, Ok(Token::As))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Assert))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Break))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Class))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Continue))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Def))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Del))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("defdel".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Elif))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Else))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Except))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Finally))));
+      assert_eq!(l.next(), Some((1, Ok(Token::For))));
+      assert_eq!(l.next(), Some((1, Ok(Token::From))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Global))));
+      assert_eq!(l.next(), Some((2, Ok(Token::If))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Import))));
+      assert_eq!(l.next(), Some((2, Ok(Token::In))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Is))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Lambda))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Nonlocal))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Not))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Or))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Pass))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Raise))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Return))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Try))));
+      assert_eq!(l.next(), Some((2, Ok(Token::While))));
+      assert_eq!(l.next(), Some((2, Ok(Token::With))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Yield))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+   }
 }
