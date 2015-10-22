@@ -91,6 +91,7 @@ impl <'a> Lexer<'a>
                   }
                }
                Some(&'\\') => self.process_line_join(current_line),
+               Some(&'\'') | Some(&'"') => self.process_string(current_line),
                Some(_) => process_symbols(current_line),
                None => process_newline(current_line),
             }
@@ -121,6 +122,40 @@ impl <'a> Lexer<'a>
       {
          let line_number = current_line.number;
          (Some((line_number, Err("** bad \\ **".to_string()))),
+            Some(current_line))
+      }
+   }
+
+   fn process_string(&mut self, line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      let line_number = line.number;
+      let mut current_line = line;
+      let quote = current_line.chars.next().unwrap();
+      let mut token_str = String::new();
+
+      while current_line.chars.peek().is_some() &&
+         *current_line.chars.peek().unwrap() != quote
+      {
+         match current_line.chars.next()
+         {
+            Some('\\') => token_str.push('\\'),
+            Some('\n') => token_str.push('\n'),
+            Some(cur_char) => token_str.push(cur_char),
+            _ => unreachable!(),
+         }
+      }
+
+      if current_line.chars.peek().is_none()
+      {
+         (Some((current_line.number,
+            Err(format!("unterminated {}", quote).to_string()))),
+            Some(current_line))
+      }
+      else
+      {
+         current_line.chars.next().unwrap();
+         (Some((line_number, Ok(Token::String(token_str)))),
             Some(current_line))
       }
    }
@@ -901,5 +936,15 @@ mod tests
       assert_eq!(l.next(), Some((2, Ok(Token::With))));
       assert_eq!(l.next(), Some((2, Ok(Token::Yield))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+   }
+
+   #[test]
+   fn test_strings_1()
+   {
+      let chars = "'abc 123 \txyz@\")#*)@' \"wfe wf w fwe'fwefw\"\n";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }
 }

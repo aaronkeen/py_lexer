@@ -87,6 +87,7 @@ pub enum Token
    DoubleQuote,
    Identifier(String),
    String(String),
+   Bytes(String),
    DecInteger(String),
    BinInteger(String),
    OctInteger(String),
