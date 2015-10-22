@@ -23,16 +23,18 @@ struct Line<'a>
 {
    number: usize,
    indentation: u32,
+   leading_spaces: String,
    chars: DoublePeekable<Chars<'a>>
 }
 
 impl <'a> Line<'a>
 {
-   fn new<'b>(number: usize, indentation: u32,
+   fn new<'b>(number: usize, indentation: u32, leading_spaces: String,
       chars: DoublePeekable<Chars<'b>>)
       -> Line<'b>
    {
-      Line {number: number, indentation: indentation, chars: chars}
+      Line {number: number, indentation: indentation,
+         leading_spaces: leading_spaces, chars: chars}
    }
 }
 
@@ -45,7 +47,10 @@ impl <'a> Lexer<'a>
       let iter = (1..).zip(lines)
          .map(|(n, line)| (n, DoublePeekable::new(line.chars())))
          .map(|(n, mut chars)|
-            Line::new(n, count_indentation(&mut chars), chars));
+            {
+               let (indentation, spaces) = count_indentation(&mut chars);
+               Line::new(n, indentation, spaces, chars)
+            });
       ;
       Lexer{indent_stack: vec![0],
          dedent_count: 0,
@@ -129,7 +134,7 @@ impl <'a> Lexer<'a>
    fn process_string(&mut self, line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
-      let line_number = line.number;
+      let first_line_number = line.number;
       let mut current_line = line;
       let quote = current_line.chars.next().unwrap();
       let mut token_str = String::new();
@@ -139,8 +144,25 @@ impl <'a> Lexer<'a>
       {
          match current_line.chars.next()
          {
-            Some('\\') => token_str.push('\\'),
-            Some('\n') => token_str.push('\n'),
+            Some('\\') =>
+            {
+               let line_number = current_line.number;
+               let (new_line, new_token_str) =
+                  self.handle_escaped_character(current_line, token_str);
+
+               token_str = new_token_str;
+
+               if new_line.is_some()
+               {
+                  current_line = new_line.unwrap();
+               }
+               else
+               {
+                  return (Some((line_number + 1,
+                     Err(format!("unterminated {}", quote).to_string()))),
+                     new_line)
+               }
+            },
             Some(cur_char) => token_str.push(cur_char),
             _ => unreachable!(),
          }
@@ -154,9 +176,29 @@ impl <'a> Lexer<'a>
       }
       else
       {
-         current_line.chars.next().unwrap();
-         (Some((line_number, Ok(Token::String(token_str)))),
+         current_line.chars.next().unwrap();    // consume quote
+         (Some((first_line_number, Ok(Token::String(token_str)))),
             Some(current_line))
+      }
+   }
+
+   fn handle_escaped_character(&mut self, line: Line<'a>,
+      mut token_str: String)
+      -> (Option<Line<'a>>, String)
+   {
+      if line.chars.peek().is_none() // end of line escape, join lines
+      {
+         let next_line = self.lines.next();
+         if next_line.is_some()
+         {
+            token_str.push_str(&next_line.as_ref().unwrap().leading_spaces);
+         }
+         (next_line, token_str)
+      }
+      else
+      {
+         token_str.push('\\');
+         (Some(line), token_str)
       }
    }
 
@@ -696,16 +738,17 @@ fn process_character(count: u32, c: char)
 }
 
 fn count_indentation(chars: &mut DoublePeekable<Chars>)
-   -> u32
+   -> (u32, String)
 {
    let mut count = 0;
+   let mut spaces = String::new();
 
    while let Some(&c) = chars.peek()
    {
       if is_space(c)
       {
          count = process_character(count, c);
-         chars.next();
+         spaces.push(chars.next().unwrap());
       }
       else
       {
@@ -713,7 +756,7 @@ fn count_indentation(chars: &mut DoublePeekable<Chars>)
       }
    }
 
-   count
+   (count, spaces)
 }
 
 /// This function should be modified to do a more appropriate unicode
@@ -941,10 +984,16 @@ mod tests
    #[test]
    fn test_strings_1()
    {
-      let chars = "'abc 123 \txyz@\")#*)@' \"wfe wf w fwe'fwefw\"\n";
+      let chars = "'abc 123 \txyz@\")#*)@' \"wfe wf w fwe'fwefw\" \"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\\\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
+      assert_eq!(l.next(), Some((1, Err("unterminated \"".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("last line".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("just   kidding    \t kids".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((8, Err("unterminated \'".to_string()))));
    }
 }
