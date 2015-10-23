@@ -96,43 +96,6 @@ pub enum Token
    Imaginary(String),
 }
 
-const KEYWORDS : [(&'static str, Token); 33] =
-   [
-      ("False", Token::False),
-      ("None", Token::None),
-      ("True", Token::True),
-      ("and", Token::And),
-      ("as", Token::As),
-      ("assert", Token::Assert),
-      ("break", Token::Break),
-      ("class", Token::Class),
-      ("continue", Token::Continue),
-      ("def", Token::Def),
-      ("del", Token::Del),
-      ("elif", Token::Elif),
-      ("else", Token::Else),
-      ("except", Token::Except),
-      ("finally", Token::Finally),
-      ("for", Token::For),
-      ("from", Token::From),
-      ("global", Token::Global),
-      ("if", Token::If),
-      ("import", Token::Import),
-      ("in", Token::In),
-      ("is", Token::Is),
-      ("lambda", Token::Lambda),
-      ("nonlocal", Token::Nonlocal),
-      ("not", Token::Not),
-      ("or", Token::Or),
-      ("pass", Token::Pass),
-      ("raise", Token::Raise),
-      ("return", Token::Return),
-      ("try", Token::Try),
-      ("while", Token::While),
-      ("with", Token::With),
-      ("yield", Token::Yield),
-   ];
-
 impl Token
 {
    pub fn is_decimal_integer(&self)
@@ -155,15 +118,26 @@ impl Token
       }
    }
 
-   pub fn number_lexeme(self)
+   pub fn lexeme(self)
       -> String
    {
       match self
       {
-         Token::DecInteger(s) | Token::BinInteger(s) |
+         Token::Identifier(s) | Token::String(s) | Token::Bytes(s) |
+            Token::DecInteger(s) | Token::BinInteger(s) |
             Token::OctInteger(s) | Token::HexInteger(s) |
             Token::Float(s) | Token::Imaginary(s) => s,
-         _ => panic!(format!("invalid number token: {:?}", self)),
+         _ =>
+         {
+            for &(ref tk, s) in LEXEMES.into_iter()
+            {
+               if tk == &self
+               {
+                  return s.to_string();
+               }
+            }
+            unreachable!{};
+         }
       }
    }
 
@@ -206,3 +180,128 @@ pub fn keyword_lookup(token_str: String)
 
    return Token::Identifier(token_str)
 }
+
+const KEYWORDS : [(&'static str, Token); 33] =
+   [
+      ("False", Token::False),
+      ("None", Token::None),
+      ("True", Token::True),
+      ("and", Token::And),
+      ("as", Token::As),
+      ("assert", Token::Assert),
+      ("break", Token::Break),
+      ("class", Token::Class),
+      ("continue", Token::Continue),
+      ("def", Token::Def),
+      ("del", Token::Del),
+      ("elif", Token::Elif),
+      ("else", Token::Else),
+      ("except", Token::Except),
+      ("finally", Token::Finally),
+      ("for", Token::For),
+      ("from", Token::From),
+      ("global", Token::Global),
+      ("if", Token::If),
+      ("import", Token::Import),
+      ("in", Token::In),
+      ("is", Token::Is),
+      ("lambda", Token::Lambda),
+      ("nonlocal", Token::Nonlocal),
+      ("not", Token::Not),
+      ("or", Token::Or),
+      ("pass", Token::Pass),
+      ("raise", Token::Raise),
+      ("return", Token::Return),
+      ("try", Token::Try),
+      ("while", Token::While),
+      ("with", Token::With),
+      ("yield", Token::Yield),
+   ];
+
+const LEXEMES : [(Token, &'static str); 84] =
+   [
+      (Token::Newline, ""),
+      (Token::Indent, ""),
+      (Token::Dedent, ""),
+      (Token::False, ""),
+      (Token::None, ""),
+      (Token::True, ""),
+      (Token::And, ""),
+      (Token::As, ""),
+      (Token::Assert, ""),
+      (Token::Break, ""),
+      (Token::Class, ""),
+      (Token::Continue, ""),
+      (Token::Def, ""),
+      (Token::Del, ""),
+      (Token::Elif, ""),
+      (Token::Else, ""),
+      (Token::Except, ""),
+      (Token::Finally, ""),
+      (Token::For, ""),
+      (Token::From, ""),
+      (Token::Global, ""),
+      (Token::If, ""),
+      (Token::Import, ""),
+      (Token::In, ""),
+      (Token::Is, ""),
+      (Token::Lambda, ""),
+      (Token::Nonlocal, ""),
+      (Token::Not, ""),
+      (Token::Or, ""),
+      (Token::Pass, ""),
+      (Token::Raise, ""),
+      (Token::Return, ""),
+      (Token::Try, ""),
+      (Token::While, ""),
+      (Token::With, ""),
+      (Token::Yield, ""),
+      (Token::Plus, ""),
+      (Token::Minus, ""),
+      (Token::Times, ""),
+      (Token::Exponent, ""),
+      (Token::Divide, ""),
+      (Token::DivideFloor, ""),
+      (Token::Mod, ""),
+      (Token::At, ""),
+      (Token::Lshift, ""),
+      (Token::Rshift, ""),
+      (Token::BitAnd, ""),
+      (Token::BitOr, ""),
+      (Token::BitXor, ""),
+      (Token::BitNot, ""),
+      (Token::LT, ""),
+      (Token::GT, ""),
+      (Token::LE, ""),
+      (Token::GE, ""),
+      (Token::EQ, ""),
+      (Token::NE, ""),
+      (Token::Lparen, ""),
+      (Token::Rparen, ""),
+      (Token::Lbracket, ""),
+      (Token::Rbracket, ""),
+      (Token::Lbrace, ""),
+      (Token::Rbrace, ""),
+      (Token::Comma, ""),
+      (Token::Colon, ""),
+      (Token::Dot, ""),
+      (Token::Ellipsis, ""),
+      (Token::Semi, ""),
+      (Token::Arrow, ""),
+      (Token::Assign, ""),
+      (Token::AssignPlus, ""),
+      (Token::AssignMinus, ""),
+      (Token::AssignTimes, ""),
+      (Token::AssignDivide, ""),
+      (Token::AssignDivideFloor, ""),
+      (Token::AssignMod, ""),
+      (Token::AssignAt, ""),
+      (Token::AssignBitAnd, ""),
+      (Token::AssignBitOr, ""),
+      (Token::AssignBitXor, ""),
+      (Token::AssignRshift, ""),
+      (Token::AssignLshift, ""),
+      (Token::AssignExponent, ""),
+      (Token::Quote, ""),
+      (Token::DoubleQuote, ""),
+   ];

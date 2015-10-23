@@ -4,6 +4,7 @@
 /// Normalize error messages
 ///
 use std::str::Chars;
+use std::iter::Peekable;
 use iter::DoublePeekable;
 use tokens::{Token, keyword_lookup};
 
@@ -13,10 +14,72 @@ pub type ResultToken = Result<Token, String>;
 
 pub struct Lexer<'a>
 {
+   lexer: Peekable<InternalLexer<'a>>
+}
+
+impl <'a> Lexer<'a>
+{
+   pub fn new<'b, I>(lines: I)
+      -> Lexer<'b>
+      where I: Iterator<Item=&'b str> + 'b
+   {
+      Lexer{lexer: InternalLexer::new(lines).peekable()}
+   }
+
+   fn string_follows(&mut self)
+      -> Option<String>
+   {
+      match self.lexer.peek()
+      {
+         Some(&(_, Ok(Token::String(_)))) =>
+         {
+            Some(self.lexer.next().unwrap().1.ok().unwrap().lexeme())
+         },
+         _ => None,
+      }
+   }
+}
+
+impl <'a> Iterator for Lexer<'a>
+{
+   type Item = (usize, ResultToken);
+
+   fn next(&mut self)
+      -> Option<Self::Item>
+   {
+      match self.lexer.next()
+      {
+         Some((line_number, Ok(Token::String(s)))) =>
+         {
+            let mut token_str = s.clone();
+            while let Some(follow) = self.string_follows()
+            {
+               token_str.push_str(&follow)
+            }
+            Some((line_number, Ok(Token::String(token_str))))
+         },
+         result => result,
+      }
+   }
+}
+
+pub struct InternalLexer<'a>
+{
    indent_stack: Vec<u32>,
    dedent_count: i32,
    lines: Box<Iterator<Item=Line<'a>> + 'a>,
    current_line: Option<Line<'a>>,
+}
+
+impl <'a> Iterator for InternalLexer<'a>
+{
+   type Item = (usize, ResultToken);
+
+   fn next(&mut self)
+      -> Option<Self::Item>
+   {
+      self.next_token()
+   }
 }
 
 struct Line<'a>
@@ -38,10 +101,10 @@ impl <'a> Line<'a>
    }
 }
 
-impl <'a> Lexer<'a>
+impl <'a> InternalLexer<'a>
 {
    pub fn new<'b, I>(lines: I)
-      -> Lexer<'b>
+      -> InternalLexer<'b>
       where I: Iterator<Item=&'b str> + 'b
    {
       let iter = (1..).zip(lines)
@@ -52,7 +115,7 @@ impl <'a> Lexer<'a>
                Line::new(n, indentation, spaces, chars)
             });
       ;
-      Lexer{indent_stack: vec![0],
+      InternalLexer{indent_stack: vec![0],
          dedent_count: 0,
          lines: Box::new(iter),
          current_line: None,
@@ -423,7 +486,7 @@ fn require_float_part(token: ResultToken, line: &mut Line)
    if !float_part
    {
       Err("** missing float part: ".to_string() +
-         &token.ok().unwrap().number_lexeme())
+         &token.ok().unwrap().lexeme())
 
    }
    else
@@ -453,7 +516,7 @@ fn build_point_float(token: ResultToken, line: &mut Line)
          format!("Invalid floating point number: {:?}", token).to_string())
    }
 
-   let mut token_str = token.ok().unwrap().number_lexeme();
+   let mut token_str = token.ok().unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap());
 
@@ -491,7 +554,7 @@ fn build_exp_float(token: ResultToken, line: &mut Line)
             token.ok().unwrap()).to_string()),
    }
 
-   let mut token_str = token.ok().unwrap().number_lexeme();
+   let mut token_str = token.ok().unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap()); // consume the e|E
 
@@ -528,7 +591,7 @@ fn build_img_float(token: ResultToken, line: &mut Line)
             .to_string())
    }
 
-   let mut token_str = token.ok().unwrap().number_lexeme();
+   let mut token_str = token.ok().unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap()); // consume the j|J
 
@@ -697,17 +760,6 @@ fn consume_and_while<P>(mut token_str: String, line: &mut Line, predicate: P)
    }
 
    token_str
-}
-
-impl <'a> Iterator for Lexer<'a>
-{
-   type Item = (usize, ResultToken);
-
-   fn next(&mut self)
-      -> Option<Self::Item>
-   {
-      self.next_token()
-   }
 }
 
 fn determine_spaces(char_count: u32, tab_stop_size: u32)
@@ -984,16 +1036,27 @@ mod tests
    #[test]
    fn test_strings_1()
    {
-      let chars = "'abc 123 \txyz@\")#*)@' \"wfe wf w fwe'fwefw\" \"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\\\n";
+      let chars = "'abc 123 \txyz@\")#*)@'\n\"wfe wf w fwe'fwefw\"\n\"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\\\n";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
-      assert_eq!(l.next(), Some((1, Err("unterminated \"".to_string()))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("last line".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Ok(Token::String("just   kidding    \t kids".to_string())))));
-      assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((8, Err("unterminated \'".to_string()))));
+      assert_eq!(l.next(), Some((3, Err("unterminated \"".to_string()))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("last line".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((5, Ok(Token::String("just   kidding    \t kids".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((10, Err("unterminated \'".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_2()
+   {
+      let chars = "'abc' \"def\" \\\n'123'\n";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef123".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
    }
 }
