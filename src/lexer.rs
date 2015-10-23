@@ -194,16 +194,29 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_string(&mut self, line: Line<'a>)
+   fn process_string(&mut self, mut line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      let quote = line.chars.next().unwrap();
+      if line.chars.peek().map_or(false, |&c| c == quote) &&
+         line.chars.peek_second().map_or(false, |&c| c == quote)
+      {
+         self.process_long_string(line, quote)
+      }
+      else
+      {
+         self.process_short_string(line, quote)
+      }
+   }
+
+   fn process_short_string(&mut self, line: Line<'a>, quote: char)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
       let first_line_number = line.number;
       let mut current_line = line;
-      let quote = current_line.chars.next().unwrap();
       let mut token_str = String::new();
 
-      while current_line.chars.peek().is_some() &&
-         *current_line.chars.peek().unwrap() != quote
+      while current_line.chars.peek().map_or(false, |&c| c != quote)
       {
          match current_line.chars.next()
          {
@@ -243,6 +256,77 @@ impl <'a> InternalLexer<'a>
          (Some((first_line_number, Ok(Token::String(token_str)))),
             Some(current_line))
       }
+   }
+
+   fn process_long_string(&mut self, mut line: Line<'a>, quote: char)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      // consume second two quote characters
+      line.chars.next();
+      line.chars.next();
+
+      let first_line_number = line.number;
+      let mut current_line = line;
+      let mut token_str = String::new();
+
+      loop
+      {
+         match current_line.chars.next()
+         {
+            Some('\\') =>
+            {
+               let line_number = current_line.number;
+               let (new_line, new_token_str) =
+                  self.handle_escaped_character(current_line, token_str);
+
+               token_str = new_token_str;
+
+               if new_line.is_some()
+               {
+                  current_line = new_line.unwrap();
+               }
+               else
+               {
+                  return (Some((line_number + 1,
+                     Err(format!("unterminated {}", quote).to_string()))),
+                     None)
+               }
+            },
+            Some(cur_char) if cur_char == quote =>
+            {
+               if current_line.chars.peek().map_or(false, |&c| c == quote) &&
+                  current_line.chars.peek_second()
+                     .map_or(false, |&c| c == quote)
+               {
+                  break;
+               }
+               else
+               {
+                  token_str.push(cur_char);
+               }
+            },
+            Some(cur_char) => token_str.push(cur_char),
+            None => // end of line
+            {
+               token_str.push('\n');
+               let line_number = current_line.number;
+               match self.lines.next()
+               {
+                  Some(line) =>
+                  {
+                     token_str.push_str(&line.leading_spaces);
+                     current_line = line;
+                  },
+                  _ => return (Some((line_number + 1,
+                     Err(format!("unterminated {0}{0}{0}", quote)
+                        .to_string()))), None)
+               }
+            },
+         }
+      }
+
+      (Some((first_line_number, Ok(Token::String(token_str)))),
+         Some(current_line))
    }
 
    fn handle_escaped_character(&mut self, line: Line<'a>,
@@ -424,8 +508,7 @@ fn build_zero_prefixed_number(line: &mut Line)
       {
          token_str = consume_and_while(token_str, line,
             |c| c.is_digit(1));
-         if line.chars.peek().is_some() &&
-            line.chars.peek().unwrap().is_digit(10)
+         if line.chars.peek().map_or(false, |c| c.is_digit(10))
          {
             let token = require_radix_digits(token_str, line, 10,
                |s| Token::DecInteger(s));
@@ -476,10 +559,8 @@ fn require_float_part(token: ResultToken, line: &mut Line)
 
    {
       let first = line.chars.peek();
-      float_part = first.is_some() &&
-         (*first.unwrap() == '.'
-         || *first.unwrap() == 'e' || *first.unwrap() == 'E'
-         || *first.unwrap() == 'j' || *first.unwrap() == 'J'
+      float_part = first.map_or(false,
+         |&c| c == '.' || c == 'e' || c == 'E' || c == 'j' || c == 'J'
          );
    }
 
@@ -520,8 +601,7 @@ fn build_point_float(token: ResultToken, line: &mut Line)
 
    token_str.push(line.chars.next().unwrap());
 
-   if line.chars.peek().is_some() &&
-      line.chars.peek().unwrap().is_digit(10)
+   if line.chars.peek().map_or(false, |c| c.is_digit(10))
    {
       require_radix_digits(token_str, line, 10, |s| Token::Float(s))
    }
@@ -559,9 +639,7 @@ fn build_exp_float(token: ResultToken, line: &mut Line)
    token_str.push(line.chars.next().unwrap()); // consume the e|E
 
    // plus or minus here
-   if line.chars.peek().is_some() &&
-      (*line.chars.peek().unwrap() == '+' ||
-      *line.chars.peek().unwrap() == '-')
+   if line.chars.peek().map_or(false, |&c| c == '+' || c == '-')
    {
       token_str.push(line.chars.next().unwrap()); // consume the +|-
    }
@@ -712,7 +790,7 @@ fn match_pair_opt(old_token: Token, line: &mut Line,
    c: char, matched_token: Token)
    -> Token
 {
-   if line.chars.peek().is_some() && *line.chars.peek().unwrap() == c
+   if line.chars.peek().map_or(false, |&k| k == c)
    {
       line.chars.next();
       matched_token
@@ -734,8 +812,7 @@ fn match_pair_eq_opt(line: &mut Line, initial_token: Token,
 
 fn consume_space_to_next(current_line: &mut Line)
 {
-   while current_line.chars.peek().is_some() &&
-      is_space(*current_line.chars.peek().unwrap())
+   while current_line.chars.peek().map_or(false, |&c| is_space(c))
    {
       current_line.chars.next();
    }
@@ -753,8 +830,7 @@ fn consume_and_while<P>(mut token_str: String, line: &mut Line, predicate: P)
 {
    token_str.push(line.chars.next().unwrap());
 
-   while line.chars.peek().is_some() &&
-      predicate(*line.chars.peek().unwrap())
+   while line.chars.peek().map_or(false, |&c| predicate(c))
    {
       token_str.push(line.chars.next().unwrap());
    }
@@ -1058,5 +1134,21 @@ mod tests
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef123".to_string())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+   }
+
+   #[test]
+   fn test_strings_3()
+   {
+      let chars = "''' abc ' '' '''\n\"\"\"xyz\"\"\"\n'''abc\n \tdef\n123'''\n'''abc\\\n \tdef\\\n123'''\n'''abc\ndef";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String(" abc ' '' ".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("xyz".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("abc\n \tdef\n123".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((6, Ok(Token::String("abc \tdef123".to_string())))));
+      assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((11, Err("unterminated '''".to_string()))));
    }
 }
