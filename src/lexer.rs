@@ -3,10 +3,15 @@
 ///
 /// Normalize error messages
 ///
+
+extern crate unicode_names;
+
+use std::char;
 use std::str::Chars;
 use std::iter::Peekable;
 use iter::DoublePeekable;
 use tokens::{Token, keyword_lookup};
+
 
 const TAB_STOP_SIZE: u32 = 8;
 
@@ -350,10 +355,7 @@ impl <'a> InternalLexer<'a>
          None => // end of line escape, join lines
          {
             let next_line = self.lines.next();
-            if next_line.is_some()
-            {
-               token_str.push_str(&next_line.as_ref().unwrap().leading_spaces);
-            }
+            next_line.as_ref().map(|l| token_str.push_str(&l.leading_spaces));
             (next_line, Ok(token_str))
          },
          Some('\\') =>
@@ -406,25 +408,33 @@ impl <'a> InternalLexer<'a>
             token_str.push('\x0B'); // VT
             (Some(line), Ok(token_str))
          },
-         Some(c) if c.is_digit(8) =>
+         Some(c) if c.is_digit(8) =>   // octal
          {
-            unimplemented!();
+            let (new_line, token_res) =
+               push_octal_character(line, token_str, c);
+            (new_line, token_res)
          },
          Some('x') =>
          {
-            unimplemented!();
+            let (new_line, token_res) = push_hex_character(line, token_str);
+            (new_line, token_res)
          },
          Some('N') =>
          {
-            unimplemented!();
+            let (new_line, token_res) = push_named_character(line, token_str);
+            (new_line, token_res)
          },
          Some('u') =>
          {
-            unimplemented!();
+            let (new_line, token_res) =
+               push_unicode_character(line, token_str, 4);
+            (new_line, token_res)
          },
          Some('U') =>
          {
-            unimplemented!();
+            let (new_line, token_res) =
+               push_unicode_character(line, token_str, 8);
+            (new_line, token_res)
          },
          Some(c) =>
          {
@@ -613,6 +623,112 @@ fn build_zero_prefixed_number(line: &mut Line)
       },
       _ => build_float_part(Ok(Token::DecInteger(token_str)), line),
    }
+}
+
+fn push_octal_character(mut line: Line, mut token_str: String, c: char)
+   -> (Option<Line>, Result<String,String>)
+{
+   let mut octal = String::new();
+   octal.push(c);
+   if line.chars.peek().map_or(false, |&c| c.is_digit(8))
+   {
+      octal.push(line.chars.next().unwrap());
+      if line.chars.peek().map_or(false, |&c| c.is_digit(8))
+      {
+         octal.push(line.chars.next().unwrap());
+      }
+   }
+   match u32::from_str_radix(&octal, 8)
+   {
+      Ok(v) =>
+      {
+         token_str.push(char::from_u32(v).unwrap());
+         (Some(line), Ok(token_str))
+      },
+      _ => unreachable!(),
+   }
+}
+
+fn push_hex_character(mut line: Line, mut token_str: String)
+   -> (Option<Line>, Result<String,String>)
+{
+   match build_n_while(&mut line, 2, |c| c.is_digit(16))
+   {
+      Some(s) =>
+      {
+         let v = u32::from_str_radix(&s, 16).unwrap();
+         token_str.push(char::from_u32(v).unwrap());
+         (Some(line), Ok(token_str))
+      }
+      None => (Some(line),
+         Err("hex escape missing digit".to_string()))
+   }
+}
+
+fn push_unicode_character(mut line: Line, mut token_str: String,
+   num_digits: u32)
+   -> (Option<Line>, Result<String,String>)
+{
+   match build_n_while(&mut line, num_digits, |c| c.is_digit(16))
+   {
+      Some(s) =>
+      {
+         let v = u32::from_str_radix(&s, 16).unwrap();
+         token_str.push(char::from_u32(v).unwrap());
+         (Some(line), Ok(token_str))
+      }
+      None => (Some(line),
+         Err("malformed Unicode escape sequence".to_string()))
+   }
+}
+
+fn push_named_character(mut line: Line, mut token_str: String)
+   -> (Option<Line>, Result<String,String>)
+{
+   if !line.chars.peek().map_or(false, |&c| c == '{')
+   {
+      return (Some(line), Err("malformed \\N character escape".to_string()));
+   }
+
+   line.chars.next();   // consume {
+
+   let mut named = String::new();
+   while line.chars.peek().map_or(false, |&c| c != '}')
+   {
+      named.push(line.chars.next().unwrap());
+   }
+
+   if !line.chars.peek().map_or(false, |&c| c == '}')
+   {
+      return (Some(line), Err("malformed \\N character escape".to_string()));
+   }
+
+   line.chars.next(); // consume }
+   match unicode_names::character(&named)
+   {
+      Some(c) =>
+      {
+         token_str.push(c);
+         (Some(line), Ok(token_str))
+      },
+      _ => (Some(line), Err("unknown Unicode character name".to_string())),
+   }
+}
+
+fn build_n_while<P>(line: &mut Line, n: u32, predicate: P)
+   -> Option<String>
+   where P: Fn(char) -> bool
+{
+   let mut s = String::new();
+   let mut i = 0;
+
+   while i < n && line.chars.peek().map_or(false, |&c| predicate(c))
+   {
+      s.push(line.chars.next().unwrap());
+      i += 1;
+   }
+
+   if i == n { Some(s) } else { None }
 }
 
 fn require_radix_digits<F>(token_str: String, line: &mut Line,
@@ -1264,5 +1380,104 @@ mod tests
       assert_eq!(l.next(), Some((10, Ok(Token::String("\x0B".to_string())))));
       assert_eq!(l.next(), Some((10, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((11, Ok(Token::String("\\m".to_string())))));
+   }
+
+   #[test]
+   fn test_strings_5()
+   {
+      let chars = "'\\007'\n'\\7'\n'\\175'\n'\\x07'\n";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("}".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
+   }
+
+   #[test]
+   fn test_strings_6()
+   {
+      let chars = "'\\x'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("hex escape missing digit".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_7()
+   {
+      let chars = "'\\x7'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("hex escape missing digit".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_8()
+   {
+      let chars = "'\\N{monkey}'\n'\\N{BLACK STAR}'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("🐒".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("★".to_string())))));
+   }
+
+   #[test]
+   fn test_strings_9()
+   {
+      let chars = "'\\N{monkey'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("malformed \\N character escape".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_10()
+   {
+      let chars = "'\\Nmonkey'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("malformed \\N character escape".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_11()
+   {
+      let chars = "'\\N{fhefaefi}'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("unknown Unicode character name".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_12()
+   {
+      let chars = "'\\u262f'\n'\\U00002D5E'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("☯".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("ⵞ".to_string())))));
+   }
+
+   #[test]
+   fn test_strings_13()
+   {
+      let chars = "'\\u262'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("malformed Unicode escape sequence".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_14()
+   {
+      let chars = "'\\U00002D'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Err("malformed Unicode escape sequence".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_15()
+   {
+      let chars = "'\\u262f262f'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_string())))));
    }
 }
