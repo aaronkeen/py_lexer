@@ -223,10 +223,16 @@ impl <'a> InternalLexer<'a>
             Some('\\') =>
             {
                let line_number = current_line.number;
-               let (new_line, new_token_str) =
+               let (new_line, new_token_res) =
                   self.handle_escaped_character(current_line, token_str);
 
-               token_str = new_token_str;
+               if new_token_res.is_err()
+               {
+                  return (Some((line_number, Err(new_token_res.unwrap_err()))),
+                     new_line)
+               }
+
+               token_str = new_token_res.ok().unwrap();
 
                if new_line.is_some()
                {
@@ -276,10 +282,16 @@ impl <'a> InternalLexer<'a>
             Some('\\') =>
             {
                let line_number = current_line.number;
-               let (new_line, new_token_str) =
+               let (new_line, new_token_res) =
                   self.handle_escaped_character(current_line, token_str);
 
-               token_str = new_token_str;
+               if new_token_res.is_err()
+               {
+                  return (Some((line_number, Err(new_token_res.unwrap_err()))),
+                     new_line)
+               }
+
+               token_str = new_token_res.ok().unwrap();
 
                if new_line.is_some()
                {
@@ -331,7 +343,7 @@ impl <'a> InternalLexer<'a>
 
    fn handle_escaped_character(&mut self, mut line: Line<'a>,
       mut token_str: String)
-      -> (Option<Line<'a>>, String)
+      -> (Option<Line<'a>>, Result<String,String>)
    {
       match line.chars.next()
       {
@@ -342,57 +354,57 @@ impl <'a> InternalLexer<'a>
             {
                token_str.push_str(&next_line.as_ref().unwrap().leading_spaces);
             }
-            (next_line, token_str)
+            (next_line, Ok(token_str))
          },
          Some('\\') =>
          {
             token_str.push('\\');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('\'') =>
          {
             token_str.push('\'');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('"') =>
          {
             token_str.push('"');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('a') =>
          {
             token_str.push('\x07'); // BEL
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('b') =>
          {
             token_str.push('\x08'); // BS
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('f') =>
          {
             token_str.push('\x0C'); // FF
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('n') =>
          {
             token_str.push('\n');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('r') =>
          {
             token_str.push('\r');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('t') =>
          {
             token_str.push('\t');
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some('v') =>
          {
             token_str.push('\x0B'); // VT
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
          Some(c) if c.is_digit(8) =>
          {
@@ -418,7 +430,7 @@ impl <'a> InternalLexer<'a>
          {
             token_str.push('\\');
             token_str.push(c);
-            (Some(line), token_str)
+            (Some(line), Ok(token_str))
          },
       }
    }
