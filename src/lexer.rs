@@ -1229,7 +1229,7 @@ mod tests
    #[test]
    fn test_strings_4()
    {
-      let chars = "'\\\\'\n'\\''\n'\\\"'\n'\\a'\n'\\b'\n'\\f'\n'\\n'\n'\\r'\n'\\t'\n'\\v'";
+      let chars = "'\\\\'\n'\\''\n'\\\"'\n'\\a'\n'\\b'\n'\\f'\n'\\n'\n'\\r'\n'\\t'\n'\\v'\n'\\m'";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
@@ -1250,5 +1250,7 @@ mod tests
       assert_eq!(l.next(), Some((9, Ok(Token::String("\t".to_string())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((10, Ok(Token::String("\x0B".to_string())))));
+      assert_eq!(l.next(), Some((10, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((11, Ok(Token::String("\\m".to_string())))));
    }
 }
