@@ -329,23 +329,97 @@ impl <'a> InternalLexer<'a>
          Some(current_line))
    }
 
-   fn handle_escaped_character(&mut self, line: Line<'a>,
+   fn handle_escaped_character(&mut self, mut line: Line<'a>,
       mut token_str: String)
       -> (Option<Line<'a>>, String)
    {
-      if line.chars.peek().is_none() // end of line escape, join lines
+      match line.chars.next()
       {
-         let next_line = self.lines.next();
-         if next_line.is_some()
+         None => // end of line escape, join lines
          {
-            token_str.push_str(&next_line.as_ref().unwrap().leading_spaces);
-         }
-         (next_line, token_str)
-      }
-      else
-      {
-         token_str.push('\\');
-         (Some(line), token_str)
+            let next_line = self.lines.next();
+            if next_line.is_some()
+            {
+               token_str.push_str(&next_line.as_ref().unwrap().leading_spaces);
+            }
+            (next_line, token_str)
+         },
+         Some('\\') =>
+         {
+            token_str.push('\\');
+            (Some(line), token_str)
+         },
+         Some('\'') =>
+         {
+            token_str.push('\'');
+            (Some(line), token_str)
+         },
+         Some('"') =>
+         {
+            token_str.push('"');
+            (Some(line), token_str)
+         },
+         Some('a') =>
+         {
+            token_str.push('\x07'); // BEL
+            (Some(line), token_str)
+         },
+         Some('b') =>
+         {
+            token_str.push('\x08'); // BS
+            (Some(line), token_str)
+         },
+         Some('f') =>
+         {
+            token_str.push('\x0C'); // FF
+            (Some(line), token_str)
+         },
+         Some('n') =>
+         {
+            token_str.push('\n');
+            (Some(line), token_str)
+         },
+         Some('r') =>
+         {
+            token_str.push('\r');
+            (Some(line), token_str)
+         },
+         Some('t') =>
+         {
+            token_str.push('\t');
+            (Some(line), token_str)
+         },
+         Some('v') =>
+         {
+            token_str.push('\x0B'); // VT
+            (Some(line), token_str)
+         },
+         Some(c) if c.is_digit(8) =>
+         {
+            unimplemented!();
+         },
+         Some('x') =>
+         {
+            unimplemented!();
+         },
+         Some('N') =>
+         {
+            unimplemented!();
+         },
+         Some('u') =>
+         {
+            unimplemented!();
+         },
+         Some('U') =>
+         {
+            unimplemented!();
+         },
+         Some(c) =>
+         {
+            token_str.push('\\');
+            token_str.push(c);
+            (Some(line), token_str)
+         },
       }
    }
 
@@ -1150,5 +1224,31 @@ mod tests
       assert_eq!(l.next(), Some((6, Ok(Token::String("abc \tdef123".to_string())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((11, Err("unterminated '''".to_string()))));
+   }
+
+   #[test]
+   fn test_strings_4()
+   {
+      let chars = "'\\\\'\n'\\''\n'\\\"'\n'\\a'\n'\\b'\n'\\f'\n'\\n'\n'\\r'\n'\\t'\n'\\v'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("'".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("\"".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((5, Ok(Token::String("\x08".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((6, Ok(Token::String("\x0C".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((7, Ok(Token::String("\n".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((8, Ok(Token::String("\r".to_string())))));
+      assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((9, Ok(Token::String("\t".to_string())))));
+      assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((10, Ok(Token::String("\x0B".to_string())))));
    }
 }
