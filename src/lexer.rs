@@ -7,6 +7,7 @@
 extern crate unicode_names;
 
 use std::char;
+use std::cmp;
 use std::str::Chars;
 use std::iter::Peekable;
 use iter::DoublePeekable;
@@ -30,7 +31,9 @@ impl <'a> Lexer<'a>
    {
       Lexer{lexer:
          StringJoiningLexer::new(
-            InternalLexer::new(lines)
+            LineJoiningLexer::new(
+               InternalLexer::new(lines)
+            )
          ).peekable()}
    }
 }
@@ -48,12 +51,12 @@ impl <'a> Iterator for Lexer<'a>
 
 pub struct StringJoiningLexer<'a>
 {
-   lexer: Peekable<InternalLexer<'a>>
+   lexer: Peekable<LineJoiningLexer<'a>>
 }
 
 impl <'a> StringJoiningLexer<'a>
 {
-   pub fn new<'b>(lexer: InternalLexer<'b>)
+   pub fn new<'b>(lexer: LineJoiningLexer<'b>)
       -> StringJoiningLexer<'b>
    {
       StringJoiningLexer{lexer: lexer.peekable()}
@@ -93,6 +96,67 @@ impl <'a> Iterator for StringJoiningLexer<'a>
          },
          result => result,
       }
+   }
+}
+
+pub struct LineJoiningLexer<'a>
+{
+   open_braces: usize,
+   lexer: Peekable<InternalLexer<'a>>
+}
+
+impl <'a> LineJoiningLexer<'a>
+{
+   pub fn new<'b>(lexer: InternalLexer<'b>)
+      -> LineJoiningLexer<'b>
+   {
+      LineJoiningLexer{open_braces: 0, lexer: lexer.peekable()}
+   }
+
+   fn next_token(&mut self)
+      -> Option<(usize, ResultToken)>
+   {
+      let result = self.lexer.next();
+      if result.is_open_grouper()
+      {
+         self.open_braces += 1;
+         result
+      }
+      else if result.is_close_grouper()
+      {
+         self.open_braces = cmp::max(0, self.open_braces - 1);
+         result
+      }
+      else if result.is_newline() && self.open_braces > 0
+      {
+         self.consume_x_dents();
+         self.next_token()
+      }
+      else
+      {
+         result
+      }
+   }
+
+   fn consume_x_dents(&mut self)
+   {
+      while self.lexer.peek().map_or(false,
+         |result| result.is_indent() || result.is_dedent() ||
+            result.is_dedent_error())
+      {
+         self.lexer.next();
+      }
+   }
+}
+
+impl <'a> Iterator for LineJoiningLexer<'a>
+{
+   type Item = (usize, ResultToken);
+
+   fn next(&mut self)
+      -> Option<Self::Item>
+   {
+      self.next_token()
    }
 }
 
@@ -1133,6 +1197,100 @@ fn is_xid_continue(c: char)
    c.is_alphanumeric() || c == '_'
 }
 
+trait ResultQuery
+{
+   fn is_indent(&self) -> bool;
+   fn is_dedent(&self) -> bool;
+   fn is_dedent_error(&self) -> bool;
+   fn is_open_grouper(&self) -> bool;
+   fn is_close_grouper(&self) -> bool;
+   fn is_newline(&self) -> bool;
+}
+
+impl ResultQuery for Option<(usize, ResultToken)>
+{
+   fn is_indent(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Indent))
+   }
+
+   fn is_dedent(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Dedent))
+   }
+
+   fn is_dedent_error(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false,
+         |&(_, ref res)| res == &Err("** DEDENT ERROR **".to_string()))
+   }
+
+   fn is_open_grouper(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false,
+         |&(_, ref res)| res == &Ok(Token::Lparen) ||
+            res == &Ok(Token::Lbrace) || res == &Ok(Token::Lbracket))
+   }
+
+   fn is_close_grouper(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false,
+         |&(_, ref res)| res == &Ok(Token::Rparen) ||
+            res == &Ok(Token::Rbrace) || res == &Ok(Token::Rbracket))
+   }
+
+   fn is_newline(&self)
+      -> bool
+   {
+      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Newline))
+   }
+}
+
+impl ResultQuery for (usize, ResultToken)
+{
+   fn is_indent(&self)
+      -> bool
+   {
+      self.1 == Ok(Token::Indent)
+   }
+
+   fn is_dedent(&self)
+      -> bool
+   {
+      self.1 == Ok(Token::Dedent)
+   }
+
+   fn is_dedent_error(&self)
+      -> bool
+   {
+      self.1 == Err("** DEDENT ERROR **".to_string())
+   }
+
+   fn is_open_grouper(&self)
+      -> bool
+   {
+      self.1 == Ok(Token::Lparen) || self.1 == Ok(Token::Lbrace)
+         || self.1 == Ok(Token::Lbracket)
+   }
+
+   fn is_close_grouper(&self)
+      -> bool
+   {
+      self.1 == Ok(Token::Rparen) || self.1 == Ok(Token::Rbrace)
+         || self.1 == Ok(Token::Rbracket)
+   }
+
+   fn is_newline(&self)
+      -> bool
+   {
+      self.1 == Ok(Token::Newline)
+   }
+}
 
 #[cfg(test)]
 mod tests
@@ -1507,5 +1665,39 @@ mod tests
       let chars = "'\\u262f262f'";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_string())))));
+   }
+
+   #[test]
+   fn test_implicit_1()
+   {
+      let chars = "(1 + \n      2 \n)";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
+      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
+   }
+
+   #[test]
+   fn test_implicit_2()
+   {
+      let chars = "   (1 + \n   (   2 \n + 9 \n ) * \n      2 \n )\n2";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Plus))));
+      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("9".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Rparen))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Times))));
+      assert_eq!(l.next(), Some((5, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Rparen))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((7, Ok(Token::DecInteger("2".to_string())))));
    }
 }
