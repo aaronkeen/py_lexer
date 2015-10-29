@@ -163,7 +163,7 @@ impl <'a> Iterator for LineJoiningLexer<'a>
 pub struct InternalLexer<'a>
 {
    indent_stack: Vec<u32>,
-   dedent_count: i32,
+   dedent_count: i32,            // negative value to indicate a misalignment
    lines: Box<Iterator<Item=Line<'a>> + 'a>,
    current_line: Option<Line<'a>>,
 }
@@ -267,7 +267,11 @@ impl <'a> InternalLexer<'a>
          match self.lines.next()
          {
             None if self.indent_stack.len() <= 1 => (None, None),
-            None => (Some((0, Ok(Token::Dedent))), None),
+            None =>
+            {
+               self.indent_stack.pop();
+               (Some((0, Ok(Token::Dedent))), None)
+            },
             Some(newline) => self.process_line_start(newline)
          }
       }
@@ -563,7 +567,7 @@ impl <'a> InternalLexer<'a>
             self.dedent_count = (stack_len - 1 - i) as i32;
             if self.indent_stack[i] != newline.indentation
             {
-               self.dedent_count *= -1;
+               self.dedent_count *= -1;         // negate to flag error
             }
             self.next_token_line(Some(newline))
          }
@@ -1327,7 +1331,6 @@ mod tests
       assert_eq!(l.next(), Some((9, Err("** DEDENT ERROR **".to_string()))));
       assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_string())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
    }   
 
