@@ -19,7 +19,7 @@ pub type ResultToken = Result<Token, String>;
 
 pub struct Lexer<'a>
 {
-   lexer: Peekable<InternalLexer<'a>>
+   lexer: Peekable<StringJoiningLexer<'a>>
 }
 
 impl <'a> Lexer<'a>
@@ -28,7 +28,35 @@ impl <'a> Lexer<'a>
       -> Lexer<'b>
       where I: Iterator<Item=&'b str> + 'b
    {
-      Lexer{lexer: InternalLexer::new(lines).peekable()}
+      Lexer{lexer:
+         StringJoiningLexer::new(
+            InternalLexer::new(lines)
+         ).peekable()}
+   }
+}
+
+impl <'a> Iterator for Lexer<'a>
+{
+   type Item = (usize, ResultToken);
+
+   fn next(&mut self)
+      -> Option<Self::Item>
+   {
+      self.lexer.next()
+   }
+}
+
+pub struct StringJoiningLexer<'a>
+{
+   lexer: Peekable<InternalLexer<'a>>
+}
+
+impl <'a> StringJoiningLexer<'a>
+{
+   pub fn new<'b>(lexer: InternalLexer<'b>)
+      -> StringJoiningLexer<'b>
+   {
+      StringJoiningLexer{lexer: lexer.peekable()}
    }
 
    fn string_follows(&mut self)
@@ -45,7 +73,7 @@ impl <'a> Lexer<'a>
    }
 }
 
-impl <'a> Iterator for Lexer<'a>
+impl <'a> Iterator for StringJoiningLexer<'a>
 {
    type Item = (usize, ResultToken);
 
