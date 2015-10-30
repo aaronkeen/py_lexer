@@ -430,6 +430,9 @@ impl <'a> InternalLexer<'a>
                   current_line.chars.peek_second()
                      .map_or(false, |&c| c == quote)
                {
+                  // consume closing quotes
+                  current_line.chars.next();
+                  current_line.chars.next();
                   break;
                }
                else
