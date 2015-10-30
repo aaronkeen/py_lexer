@@ -243,6 +243,10 @@ impl <'a> InternalLexer<'a>
             match current_line.chars.peek()
             {
                Some(&'#') => process_newline(current_line),
+               Some(&'u') | Some(&'U') | Some(&'r') | Some(&'R')
+                  if current_line.chars.peek_second().map_or(false,
+                     |&c| c == '\'' || c == '"') =>
+                        self.process_string(current_line),
                Some(&c) if is_xid_start(c) =>
                   process_identifier(current_line),
                Some(&c) if c.is_digit(10) => process_number(current_line),
@@ -298,19 +302,34 @@ impl <'a> InternalLexer<'a>
    fn process_string(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
+      if line.chars.peek().map_or(false, |&c| c == 'u' || c == 'U')
+      {
+         line.chars.next();   // skip prefix
+      }
+
+      let raw = if line.chars.peek().map_or(false, |&c| c == 'r' || c == 'R')
+         {
+            line.chars.next();
+            true
+         }
+         else
+         {
+            false
+         };
+
       let quote = line.chars.next().unwrap();
       if line.chars.peek().map_or(false, |&c| c == quote) &&
          line.chars.peek_second().map_or(false, |&c| c == quote)
       {
-         self.process_long_string(line, quote)
+         self.process_long_string(line, quote, raw)
       }
       else
       {
-         self.process_short_string(line, quote)
+         self.process_short_string(line, quote, raw)
       }
    }
 
-   fn process_short_string(&mut self, line: Line<'a>, quote: char)
+   fn process_short_string(&mut self, line: Line<'a>, quote: char, raw: bool)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
       let first_line_number = line.number;
@@ -325,7 +344,7 @@ impl <'a> InternalLexer<'a>
             {
                let line_number = current_line.number;
                let (new_line, new_token_res) =
-                  self.handle_escaped_character(current_line, token_str);
+                  self.handle_escaped_character(current_line, token_str, raw);
 
                if new_token_res.is_err()
                {
@@ -365,7 +384,7 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_long_string(&mut self, mut line: Line<'a>, quote: char)
+   fn process_long_string(&mut self, mut line: Line<'a>, quote: char, raw: bool)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
       // consume second two quote characters
@@ -384,7 +403,7 @@ impl <'a> InternalLexer<'a>
             {
                let line_number = current_line.number;
                let (new_line, new_token_res) =
-                  self.handle_escaped_character(current_line, token_str);
+                  self.handle_escaped_character(current_line, token_str, raw);
 
                if new_token_res.is_err()
                {
@@ -443,101 +462,128 @@ impl <'a> InternalLexer<'a>
    }
 
    fn handle_escaped_character(&mut self, mut line: Line<'a>,
-      mut token_str: String)
+      mut token_str: String, raw: bool)
       -> (Option<Line<'a>>, Result<String,String>)
    {
-      match line.chars.next()
+      if raw
       {
-         None => // end of line escape, join lines
+         match line.chars.next()
          {
-            let next_line = self.lines.next();
-            next_line.as_ref().map(|l| token_str.push_str(&l.leading_spaces));
-            (next_line, Ok(token_str))
-         },
-         Some('\\') =>
+            None => // end of line escape, join lines
+            {
+               token_str.push('\\');
+               token_str.push('\n');
+               let next_line = self.lines.next();
+               next_line.as_ref()
+                  .map(|l| token_str.push_str(&l.leading_spaces));
+               (next_line, Ok(token_str))
+            },
+            Some(c) =>
+            {
+               token_str.push('\\');
+               token_str.push(c);
+               (Some(line), Ok(token_str))
+            },
+         }
+      }
+      else
+      {
+         match line.chars.next()
          {
-            token_str.push('\\');
-            (Some(line), Ok(token_str))
-         },
-         Some('\'') =>
-         {
-            token_str.push('\'');
-            (Some(line), Ok(token_str))
-         },
-         Some('"') =>
-         {
-            token_str.push('"');
-            (Some(line), Ok(token_str))
-         },
-         Some('a') =>
-         {
-            token_str.push('\x07'); // BEL
-            (Some(line), Ok(token_str))
-         },
-         Some('b') =>
-         {
-            token_str.push('\x08'); // BS
-            (Some(line), Ok(token_str))
-         },
-         Some('f') =>
-         {
-            token_str.push('\x0C'); // FF
-            (Some(line), Ok(token_str))
-         },
-         Some('n') =>
-         {
-            token_str.push('\n');
-            (Some(line), Ok(token_str))
-         },
-         Some('r') =>
-         {
-            token_str.push('\r');
-            (Some(line), Ok(token_str))
-         },
-         Some('t') =>
-         {
-            token_str.push('\t');
-            (Some(line), Ok(token_str))
-         },
-         Some('v') =>
-         {
-            token_str.push('\x0B'); // VT
-            (Some(line), Ok(token_str))
-         },
-         Some(c) if c.is_digit(8) =>   // octal
-         {
-            let (new_line, token_res) =
-               push_octal_character(line, token_str, c);
-            (new_line, token_res)
-         },
-         Some('x') =>
-         {
-            let (new_line, token_res) = push_hex_character(line, token_str);
-            (new_line, token_res)
-         },
-         Some('N') =>
-         {
-            let (new_line, token_res) = push_named_character(line, token_str);
-            (new_line, token_res)
-         },
-         Some('u') =>
-         {
-            let (new_line, token_res) =
-               push_unicode_character(line, token_str, 4);
-            (new_line, token_res)
-         },
-         Some('U') =>
-         {
-            let (new_line, token_res) =
-               push_unicode_character(line, token_str, 8);
-            (new_line, token_res)
-         },
-         Some(c) =>
-         {
-            token_str.push('\\');
-            token_str.push(c);
-            (Some(line), Ok(token_str))
-         },
+            None => // end of line escape, join lines
+            {
+               let next_line = self.lines.next();
+               next_line.as_ref()
+                  .map(|l| token_str.push_str(&l.leading_spaces));
+               (next_line, Ok(token_str))
+            },
+            Some('\\') =>
+            {
+               token_str.push('\\');
+               (Some(line), Ok(token_str))
+            },
+            Some('\'') =>
+            {
+               token_str.push('\'');
+               (Some(line), Ok(token_str))
+            },
+            Some('"') =>
+            {
+               token_str.push('"');
+               (Some(line), Ok(token_str))
+            },
+            Some('a') =>
+            {
+               token_str.push('\x07'); // BEL
+               (Some(line), Ok(token_str))
+            },
+            Some('b') =>
+            {
+               token_str.push('\x08'); // BS
+               (Some(line), Ok(token_str))
+            },
+            Some('f') =>
+            {
+               token_str.push('\x0C'); // FF
+               (Some(line), Ok(token_str))
+            },
+            Some('n') =>
+            {
+               token_str.push('\n');
+               (Some(line), Ok(token_str))
+            },
+            Some('r') =>
+            {
+               token_str.push('\r');
+               (Some(line), Ok(token_str))
+            },
+            Some('t') =>
+            {
+               token_str.push('\t');
+               (Some(line), Ok(token_str))
+            },
+            Some('v') =>
+            {
+               token_str.push('\x0B'); // VT
+               (Some(line), Ok(token_str))
+            },
+            Some(c) if c.is_digit(8) =>   // octal
+            {
+               let (new_line, token_res) =
+                  push_octal_character(line, token_str, c);
+               (new_line, token_res)
+            },
+            Some('x') =>
+            {
+               let (new_line, token_res) =
+                  push_hex_character(line, token_str);
+               (new_line, token_res)
+            },
+            Some('N') =>
+            {
+               let (new_line, token_res) =
+                  push_named_character(line, token_str);
+               (new_line, token_res)
+            },
+            Some('u') =>
+            {
+               let (new_line, token_res) =
+                  push_unicode_character(line, token_str, 4);
+               (new_line, token_res)
+            },
+            Some('U') =>
+            {
+               let (new_line, token_res) =
+                  push_unicode_character(line, token_str, 8);
+               (new_line, token_res)
+            },
+            Some(c) =>
+            {
+               token_str.push('\\');
+               token_str.push(c);
+               (Some(line), Ok(token_str))
+            },
+         }
       }
    }
 
@@ -1668,6 +1714,27 @@ mod tests
       let chars = "'\\u262f262f'";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_string())))));
+   }
+
+   #[test]
+   fn test_strings_16()
+   {
+      let chars = "unlikely u'abc' u '123' U\"\"\"def\"\"\" u\n";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("unlikely".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("123def".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+   }
+
+   #[test]
+   fn test_strings_17()
+   {
+      let chars = "r'\\txyz \\\n \\'fefe \\N{monkey}'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}".to_string())))));
    }
 
    #[test]
