@@ -87,7 +87,7 @@ pub enum Token
    DoubleQuote,
    Identifier(String),
    String(String),
-   Bytes(String),
+   Bytes(Vec<u8>),
    DecInteger(String),
    BinInteger(String),
    OctInteger(String),
@@ -123,10 +123,11 @@ impl Token
    {
       match self
       {
-         Token::Identifier(s) | Token::String(s) | Token::Bytes(s) |
+         Token::Identifier(s) | Token::String(s) |
             Token::DecInteger(s) | Token::BinInteger(s) |
             Token::OctInteger(s) | Token::HexInteger(s) |
             Token::Float(s) | Token::Imaginary(s) => s,
+         Token::Bytes(s) => String::from_utf8(s).unwrap(),
          _ =>
          {
             for &(ref tk, s) in LEXEMES.into_iter()
