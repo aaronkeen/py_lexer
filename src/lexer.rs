@@ -11,7 +11,7 @@ use std::char;
 use std::cmp;
 use std::str::Chars;
 use std::iter::Peekable;
-use iter::DoublePeekable;
+use iter::MultiPeekable;
 use tokens::{Token, keyword_lookup};
 
 
@@ -241,13 +241,13 @@ struct Line<'a>
    number: usize,
    indentation: u32,
    leading_spaces: String,
-   chars: DoublePeekable<Chars<'a>>
+   chars: MultiPeekable<Chars<'a>>
 }
 
 impl <'a> Line<'a>
 {
    fn new<'b>(number: usize, indentation: u32, leading_spaces: String,
-      chars: DoublePeekable<Chars<'b>>)
+      chars: MultiPeekable<Chars<'b>>)
       -> Line<'b>
    {
       Line {number: number, indentation: indentation,
@@ -262,7 +262,7 @@ impl <'a> InternalLexer<'a>
       where I: Iterator<Item=&'b str> + 'b
    {
       let iter = (1..).zip(lines)
-         .map(|(n, line)| (n, DoublePeekable::new(line.chars())))
+         .map(|(n, line)| (n, MultiPeekable::new(line.chars())))
          .map(|(n, mut chars)|
             {
                let (indentation, spaces) = count_indentation(&mut chars);
@@ -300,20 +300,36 @@ impl <'a> InternalLexer<'a>
             match current_line.chars.peek()
             {
                Some(&'#') => process_newline(current_line),
-               Some(&'u') | Some(&'U') | Some(&'r') | Some(&'R')
-                  if current_line.chars.peek_second().map_or(false,
-                     |&c| c == '\'' || c == '"') =>
-                        self.process_string(current_line),
-               Some(&'b') | Some(&'B')
-                  if current_line.chars.peek_second().map_or(false,
-                     |&c| c == '\'' || c == '"') =>
-                        self.process_byte_string(current_line),
+               Some(&'u') | Some(&'U') | Some(&'r') | Some(&'R') =>
+               {
+                  if current_line.chars.peek_at(1).map_or(false,
+                     |&c| c == '\'' || c == '"')
+                  {
+                     self.process_string(current_line)
+                  }
+                  else
+                  {
+                     process_identifier(current_line)
+                  }
+               },
+               Some(&'b') | Some(&'B') =>
+               {
+                  if current_line.chars.peek_at(1).map_or(false,
+                     |&c| c == '\'' || c == '"')
+                  {
+                     self.process_byte_string(current_line)
+                  }
+                  else
+                  {
+                     process_identifier(current_line)
+                  }
+               },
                Some(&c) if is_xid_start(c) =>
                   process_identifier(current_line),
                Some(&c) if c.is_digit(10) => process_number(current_line),
                Some(&'.') =>
                {
-                  match current_line.chars.peek_second()
+                  match current_line.chars.peek_at(1)
                   {
                      Some(&c) if c.is_digit(10) => 
                         process_number(current_line),
@@ -381,7 +397,7 @@ impl <'a> InternalLexer<'a>
 
       let quote = line.chars.next().unwrap();
       let is_long_string = line.chars.peek().map_or(false, |&c| c == quote) &&
-         line.chars.peek_second().map_or(false, |&c| c == quote);
+         line.chars.peek_at(1).map_or(false, |&c| c == quote);
 
       self.build_string(line, quote, is_raw, is_long_string)
    }
@@ -407,7 +423,7 @@ impl <'a> InternalLexer<'a>
 
       let quote = line.chars.next().unwrap();
       let is_long_string = line.chars.peek().map_or(false, |&c| c == quote) &&
-         line.chars.peek_second().map_or(false, |&c| c == quote);
+         line.chars.peek_at(1).map_or(false, |&c| c == quote);
 
       self.build_string_byte(line, quote, is_raw, is_long_string)
    }
@@ -461,7 +477,7 @@ impl <'a> InternalLexer<'a>
                }
                else if current_line.chars.peek()
                      .map_or(false, |&c| c == quote) &&
-                  current_line.chars.peek_second()
+                  current_line.chars.peek_at(1)
                      .map_or(false, |&c| c == quote)
                {
                   // consume closing quotes
@@ -550,7 +566,7 @@ impl <'a> InternalLexer<'a>
                }
                else if current_line.chars.peek()
                      .map_or(false, |&c| c == quote) &&
-                  current_line.chars.peek_second()
+                  current_line.chars.peek_at(1)
                      .map_or(false, |&c| c == quote)
                {
                   // consume closing quotes
@@ -835,7 +851,7 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_line_start(&mut self, newline: Line<'a>)
+   fn process_line_start(&mut self, mut newline: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
       if let Some(&previous_indent) = self.indent_stack.last()
@@ -1392,15 +1408,19 @@ fn build_symbol(line: &mut Line)
          {
             // consume character
             line.chars.next();
-            match (line.chars.peek(), line.chars.peek_second())
+            match line.chars.peek()
             {
-               (Some(&'.'), Some(&'.')) =>
+               Some(&'.') => match line.chars.peek_at(1)
                {
-                  line.chars.next();
-                  line.chars.next();
-                  Token::Ellipsis
+                  Some(&'.') =>
+                  {
+                     line.chars.next();
+                     line.chars.next();
+                     Token::Ellipsis
+                  },
+                  _ => Token::Dot,
                },
-               _ => Token::Dot,
+               _ => Token::Dot, 
             }
          }
          Some(&c) => return (line.number,
@@ -1497,7 +1517,7 @@ fn process_character(count: u32, c: char)
    }
 }
 
-fn count_indentation(chars: &mut DoublePeekable<Chars>)
+fn count_indentation(chars: &mut MultiPeekable<Chars>)
    -> (u32, String)
 {
    let mut count = 0;
