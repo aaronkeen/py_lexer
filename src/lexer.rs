@@ -6,6 +6,7 @@
 
 extern crate unicode_names;
 
+use std::ascii::AsciiExt;
 use std::char;
 use std::cmp;
 use std::str::Chars;
@@ -69,7 +70,7 @@ impl <'a> StringJoiningLexer<'a>
       {
          Some(&(_, Ok(Token::String(_)))) =>
          {
-            Some(self.lexer.next().unwrap().1.ok().unwrap().lexeme())
+            Some(self.lexer.next().unwrap().1.unwrap().lexeme())
          },
          _ => None,
       }
@@ -247,6 +248,12 @@ impl <'a> InternalLexer<'a>
                   if current_line.chars.peek_second().map_or(false,
                      |&c| c == '\'' || c == '"') =>
                         self.process_string(current_line),
+/*
+               Some(&'b') | Some(&'B')
+                  if current_line.chars.peek_second().map_or(false,
+                     |&c| c == '\'' || c == '"') =>
+                        self.process_byte_string(current_line),
+*/
                Some(&c) if is_xid_start(c) =>
                   process_identifier(current_line),
                Some(&c) if c.is_digit(10) => process_number(current_line),
@@ -307,7 +314,8 @@ impl <'a> InternalLexer<'a>
          line.chars.next();   // skip prefix
       }
 
-      let raw = if line.chars.peek().map_or(false, |&c| c == 'r' || c == 'R')
+      let is_raw = if line.chars.peek()
+         .map_or(false, |&c| c == 'r' || c == 'R')
          {
             line.chars.next();
             true
@@ -318,78 +326,22 @@ impl <'a> InternalLexer<'a>
          };
 
       let quote = line.chars.next().unwrap();
-      if line.chars.peek().map_or(false, |&c| c == quote) &&
-         line.chars.peek_second().map_or(false, |&c| c == quote)
-      {
-         self.process_long_string(line, quote, raw)
-      }
-      else
-      {
-         self.process_short_string(line, quote, raw)
-      }
+      let is_long_string = line.chars.peek().map_or(false, |&c| c == quote) &&
+         line.chars.peek_second().map_or(false, |&c| c == quote);
+
+      self.build_string(line, quote, is_raw, is_long_string)
    }
 
-   fn process_short_string(&mut self, line: Line<'a>, quote: char, raw: bool)
+   fn build_string(&mut self, mut line: Line<'a>, quote: char,
+      is_raw: bool, is_long_string: bool)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
-      let first_line_number = line.number;
-      let mut current_line = line;
-      let mut token_str = String::new();
-
-      while current_line.chars.peek().map_or(false, |&c| c != quote)
+      if is_long_string
       {
-         match current_line.chars.next()
-         {
-            Some('\\') =>
-            {
-               let line_number = current_line.number;
-               let (new_line, new_token_res) =
-                  self.handle_escaped_character(current_line, token_str, raw);
-
-               if new_token_res.is_err()
-               {
-                  return (Some((line_number, Err(new_token_res.unwrap_err()))),
-                     new_line)
-               }
-
-               token_str = new_token_res.ok().unwrap();
-
-               if new_line.is_some()
-               {
-                  current_line = new_line.unwrap();
-               }
-               else
-               {
-                  return (Some((line_number + 1,
-                     Err(format!("unterminated {}", quote).to_string()))),
-                     new_line)
-               }
-            },
-            Some(cur_char) => token_str.push(cur_char),
-            _ => unreachable!(),
-         }
+         // consume second two quote characters
+         line.chars.next();
+         line.chars.next();
       }
-
-      if current_line.chars.peek().is_none()
-      {
-         (Some((current_line.number,
-            Err(format!("unterminated {}", quote).to_string()))),
-            Some(current_line))
-      }
-      else
-      {
-         current_line.chars.next().unwrap();    // consume quote
-         (Some((first_line_number, Ok(Token::String(token_str)))),
-            Some(current_line))
-      }
-   }
-
-   fn process_long_string(&mut self, mut line: Line<'a>, quote: char, raw: bool)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
-   {
-      // consume second two quote characters
-      line.chars.next();
-      line.chars.next();
 
       let first_line_number = line.number;
       let mut current_line = line;
@@ -401,32 +353,27 @@ impl <'a> InternalLexer<'a>
          {
             Some('\\') =>
             {
-               let line_number = current_line.number;
-               let (new_line, new_token_res) =
-                  self.handle_escaped_character(current_line, token_str, raw);
-
-               if new_token_res.is_err()
+               match self.process_escape_sequence(current_line, token_str,
+                  quote, is_raw)
                {
-                  return (Some((line_number, Err(new_token_res.unwrap_err()))),
-                     new_line)
-               }
-
-               token_str = new_token_res.ok().unwrap();
-
-               if new_line.is_some()
-               {
-                  current_line = new_line.unwrap();
-               }
-               else
-               {
-                  return (Some((line_number + 1,
-                     Err(format!("unterminated {}", quote).to_string()))),
-                     None)
+                  (_, Ok(new_token_str), Some(new_line)) =>
+                  {
+                     token_str = new_token_str;
+                     current_line = new_line;
+                  },
+                  (num, Err(msg), new_line) =>
+                     return (Some((num, Err(msg))), new_line),
+                  (_, Ok(_), None) => unreachable!(),
                }
             },
             Some(cur_char) if cur_char == quote =>
             {
-               if current_line.chars.peek().map_or(false, |&c| c == quote) &&
+               if !is_long_string
+               {
+                  break;
+               }
+               else if current_line.chars.peek()
+                     .map_or(false, |&c| c == quote) &&
                   current_line.chars.peek_second()
                      .map_or(false, |&c| c == quote)
                {
@@ -441,7 +388,7 @@ impl <'a> InternalLexer<'a>
                }
             },
             Some(cur_char) => token_str.push(cur_char),
-            None => // end of line
+            None if is_long_string => // end of line
             {
                token_str.push('\n');
                let line_number = current_line.number;
@@ -453,10 +400,14 @@ impl <'a> InternalLexer<'a>
                      current_line = line;
                   },
                   _ => return (Some((line_number + 1,
-                     Err(format!("unterminated {0}{0}{0}", quote)
+                        Err(format!("unterminated {0}{0}{0}", quote)
                         .to_string()))), None)
                }
             },
+            None => return (Some((current_line.number,
+                     Err(format!("unterminated {}", quote).to_string()))),
+                     Some(current_line)),
+
          }
       }
 
@@ -464,11 +415,36 @@ impl <'a> InternalLexer<'a>
          Some(current_line))
    }
 
+   fn process_escape_sequence(&mut self, current_line: Line<'a>,
+      mut token_str: String, quote: char, is_raw: bool)
+      -> (usize, Result<String, String>, Option<Line<'a>>)
+   {
+      let line_number = current_line.number;
+      let (new_line, new_token_res) =
+         self.handle_escaped_character(current_line, token_str, is_raw);
+
+      if new_token_res.is_err()
+      {
+         return (line_number, Err(new_token_res.unwrap_err()), new_line)
+      }
+
+      token_str = new_token_res.unwrap();
+
+      if new_line.is_none()
+      {
+         return (line_number + 1,
+            Err(format!("unterminated {}", quote).to_string()),
+            None)
+      }
+
+      return (line_number, Ok(token_str), new_line)
+   }
+
    fn handle_escaped_character(&mut self, mut line: Line<'a>,
-      mut token_str: String, raw: bool)
+      mut token_str: String, is_raw: bool)
       -> (Option<Line<'a>>, Result<String,String>)
    {
-      if raw
+      if is_raw
       {
          match line.chars.next()
          {
@@ -914,7 +890,7 @@ fn require_float_part(token: ResultToken, line: &mut Line)
    if !float_part
    {
       Err("** missing float part: ".to_string() +
-         &token.ok().unwrap().lexeme())
+         &token.unwrap().lexeme())
 
    }
    else
@@ -944,7 +920,7 @@ fn build_point_float(token: ResultToken, line: &mut Line)
          format!("Invalid floating point number: {:?}", token).to_string())
    }
 
-   let mut token_str = token.ok().unwrap().lexeme();
+   let mut token_str = token.unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap());
 
@@ -978,10 +954,10 @@ fn build_exp_float(token: ResultToken, line: &mut Line)
       Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
       _ => return Err(
          format!("Invalid floating point number: {:?}",
-            token.ok().unwrap()).to_string()),
+            token.unwrap()).to_string()),
    }
 
-   let mut token_str = token.ok().unwrap().lexeme();
+   let mut token_str = token.unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap()); // consume the e|E
 
@@ -1016,7 +992,7 @@ fn build_img_float(token: ResultToken, line: &mut Line)
             .to_string())
    }
 
-   let mut token_str = token.ok().unwrap().lexeme();
+   let mut token_str = token.unwrap().lexeme();
 
    token_str.push(line.chars.next().unwrap()); // consume the j|J
 
@@ -1552,7 +1528,7 @@ mod tests
    #[test]
    fn test_strings_1()
    {
-      let chars = "'abc 123 \txyz@\")#*)@'\n\"wfe wf w fwe'fwefw\"\n\"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\\\n";
+      let chars = "'abc 123 \txyz@\")#*)@'\n\"wfe wf w fwe'fwefw\"\n\"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\nxyz'";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
@@ -1564,7 +1540,7 @@ mod tests
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((5, Ok(Token::String("just   kidding    \t kids".to_string())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((10, Err("unterminated \'".to_string()))));
+      assert_eq!(l.next(), Some((9, Err("unterminated \'".to_string()))));
    }
 
    #[test]
@@ -1738,6 +1714,14 @@ mod tests
       let chars = "r'\\txyz \\\n \\'fefe \\N{monkey}'";
       let mut l = Lexer::new(chars.lines_any());
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}".to_string())))));
+   }
+
+   #[test]
+   fn test_strings_18()
+   {
+      let chars = "r'''\\txyz \\\n \\'fefe \\N{monkey}''''hello'";
+      let mut l = Lexer::new(chars.lines_any());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello".to_string())))));
    }
 
    #[test]
