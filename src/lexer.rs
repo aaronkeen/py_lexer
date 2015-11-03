@@ -370,7 +370,8 @@ impl <'a> InternalLexer<'a>
       {
          match self.lines.next()
          {
-            None if self.indent_stack.len() <= 1 => (None, None),
+            None if self.indent_stack.len() <= 1 =>
+               (Some((0, Ok(Token::Endmarker))), None),
             None =>
             {
                self.indent_stack.pop();
@@ -1708,6 +1709,7 @@ mod tests
       assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_string())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((0, Ok(Token::Endmarker))));
    }   
 
    #[test]
