@@ -34,9 +34,7 @@ impl <'a> Lexer<'a>
       Lexer{lexer:
          StringJoiningLexer::new(
             BytesJoiningLexer::new(
-               LineJoiningLexer::new(
-                  InternalLexer::new(lines)
-               )
+               InternalLexer::new(lines)
             )
          ).peekable()}
    }
@@ -105,12 +103,12 @@ impl <'a> Iterator for StringJoiningLexer<'a>
 
 pub struct BytesJoiningLexer<'a>
 {
-   lexer: Peekable<LineJoiningLexer<'a>>
+   lexer: Peekable<InternalLexer<'a>>
 }
 
 impl <'a> BytesJoiningLexer<'a>
 {
-   pub fn new<'b>(lexer: LineJoiningLexer<'b>)
+   pub fn new<'b>(lexer: InternalLexer<'b>)
       -> BytesJoiningLexer<'b>
    {
       BytesJoiningLexer{lexer: lexer.peekable()}
@@ -157,86 +155,6 @@ impl <'a> Iterator for BytesJoiningLexer<'a>
    }
 }
 
-pub struct LineJoiningLexer<'a>
-{
-   open_braces: usize,
-   lexer: Peekable<InternalLexer<'a>>
-}
-
-impl <'a> LineJoiningLexer<'a>
-{
-   pub fn new<'b>(lexer: InternalLexer<'b>)
-      -> LineJoiningLexer<'b>
-   {
-      LineJoiningLexer{open_braces: 0, lexer: lexer.peekable()}
-   }
-
-   fn next_token(&mut self)
-      -> Option<(usize, ResultToken)>
-   {
-      let result = self.lexer.next();
-      if result.is_open_grouper()
-      {
-         self.open_braces += 1;
-         result
-      }
-      else if result.is_close_grouper()
-      {
-         self.open_braces = cmp::max(0, self.open_braces - 1);
-         result
-      }
-      else if result.is_newline() && self.open_braces > 0
-      {
-         self.consume_x_dents();
-         self.next_token()
-      }
-      else
-      {
-         result
-      }
-   }
-
-   fn consume_x_dents(&mut self)
-   {
-      while self.lexer.peek().map_or(false,
-         |result| result.is_indent() || result.is_dedent() ||
-            result.is_dedent_error())
-      {
-         self.lexer.next();
-      }
-   }
-}
-
-impl <'a> Iterator for LineJoiningLexer<'a>
-{
-   type Item = (usize, ResultToken);
-
-   fn next(&mut self)
-      -> Option<Self::Item>
-   {
-      self.next_token()
-   }
-}
-
-pub struct InternalLexer<'a>
-{
-   indent_stack: Vec<u32>,
-   dedent_count: i32,            // negative value to indicate a misalignment
-   lines: Box<Iterator<Item=Line<'a>> + 'a>,
-   current_line: Option<Line<'a>>,
-}
-
-impl <'a> Iterator for InternalLexer<'a>
-{
-   type Item = (usize, ResultToken);
-
-   fn next(&mut self)
-      -> Option<Self::Item>
-   {
-      self.next_token()
-   }
-}
-
 struct Line<'a>
 {
    number: usize,
@@ -253,6 +171,26 @@ impl <'a> Line<'a>
    {
       Line {number: number, indentation: indentation,
          leading_spaces: leading_spaces, chars: chars}
+   }
+}
+
+pub struct InternalLexer<'a>
+{
+   indent_stack: Vec<u32>,
+   dedent_count: i32,            // negative value to indicate a misalignment
+   open_braces: u32,
+   lines: Box<Iterator<Item=Line<'a>> + 'a>,
+   current_line: Option<Line<'a>>,
+}
+
+impl <'a> Iterator for InternalLexer<'a>
+{
+   type Item = (usize, ResultToken);
+
+   fn next(&mut self)
+      -> Option<Self::Item>
+   {
+      self.next_token()
    }
 }
 
@@ -274,6 +212,7 @@ impl <'a> InternalLexer<'a>
          dedent_count: 0,
          lines: Box::new(iter),
          current_line: None,
+         open_braces: 0,
       }
    }
 
@@ -300,7 +239,7 @@ impl <'a> InternalLexer<'a>
             consume_space_to_next(&mut current_line);
             match current_line.chars.peek()
             {
-               Some(&'#') => process_newline(current_line),
+               Some(&'#') => self.process_end_of_line(current_line),
                Some(&'u') | Some(&'U') =>
                {
                   if current_line.chars.peek_at(1).map_or(false,
@@ -357,13 +296,13 @@ impl <'a> InternalLexer<'a>
                   {
                      Some(&c) if c.is_digit(10) => 
                         process_number(current_line),
-                     _ => process_symbols(current_line),
+                     _ => self.process_symbols(current_line),
                   }
                }
                Some(&'\\') => self.process_line_join(current_line),
                Some(&'\'') | Some(&'"') => self.process_string(current_line),
-               Some(_) => process_symbols(current_line),
-               None => process_newline(current_line),
+               Some(_) => self.process_symbols(current_line),
+               None => self.process_end_of_line(current_line),
             }
          }
       }
@@ -868,7 +807,8 @@ impl <'a> InternalLexer<'a>
    {
       if let Some(&previous_indent) = self.indent_stack.last()
       {
-         if newline.chars.peek().is_none()
+         if newline.chars.peek().is_none() ||                  // blank line
+            newline.chars.peek().map_or(false, |&c| c == '#')  // only comment
          {
             self.next_token_line(None)
          }
@@ -917,6 +857,151 @@ impl <'a> InternalLexer<'a>
       {
          self.dedent_count += if self.dedent_count < 0 {1} else {-1};
          (Some((current_line.number, Ok(Token::Dedent))), Some(current_line))
+      }
+   }
+
+   fn process_symbols(&mut self, mut line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      let result = self.build_symbol(&mut line);
+      (Some(result), Some(line))
+   }
+
+   fn build_symbol(&mut self, line: &mut Line<'a>)
+      -> (usize, ResultToken)
+   {
+      let result =
+         match line.chars.peek()
+         {
+            Some(&'(') =>
+            {
+               self.open_braces += 1;
+               match_one(line, Token::Lparen)
+            },
+            Some(&')') =>
+            {
+               self.open_braces = cmp::max(0, self.open_braces - 1);
+               match_one(line, Token::Rparen)
+            },
+            Some(&'[') =>
+            {
+               self.open_braces += 1;
+               match_one(line, Token::Lbracket)
+            },
+            Some(&']') =>
+            {
+               self.open_braces = cmp::max(0, self.open_braces - 1);
+               match_one(line, Token::Rbracket)
+            },
+            Some(&'{') =>
+            {
+               self.open_braces += 1;
+               match_one(line, Token::Lbrace)
+            },
+            Some(&'}') =>
+            {
+               self.open_braces = cmp::max(0, self.open_braces - 1);
+               match_one(line, Token::Rbrace)
+            },
+            Some(&',') => match_one(line, Token::Comma),
+            Some(&':') => match_one(line, Token::Colon),
+            Some(&';') => match_one(line, Token::Semi),
+            Some(&'~') => match_one(line, Token::BitNot),
+            Some(&'=') => match_pair_opt(
+               match_one(line, Token::Assign), line, '=', Token::EQ),
+            Some(&'@') => match_pair_opt(
+               match_one(line, Token::At), line, '=', Token::AssignAt),
+            Some(&'%') => match_pair_opt(
+               match_one(line, Token::Mod), line, '=', Token::AssignMod),
+            Some(&'&') => match_pair_opt(
+               match_one(line, Token::BitAnd), line, '=', Token::AssignBitAnd),
+            Some(&'|') => match_pair_opt(
+               match_one(line, Token::BitOr), line, '=', Token::AssignBitOr),
+            Some(&'^') => match_pair_opt(
+               match_one(line, Token::BitXor), line, '=', Token::AssignBitXor),
+            Some(&'+') => match_pair_opt(
+               match_one(line, Token::Plus), line, '=', Token::AssignPlus),
+            Some(&'*') =>
+            {
+               let token = match_one(line, Token::Times);
+               match_pair_eq_opt(line, token, '*', Token::Exponent)
+            },
+            Some(&'/') =>
+            {
+               let token = match_one(line, Token::Divide);
+               match_pair_eq_opt(line, token, '/', Token::DivideFloor)
+            },
+            Some(&'<') =>
+            {
+               let token = match_one(line, Token::LT);
+               match_pair_eq_opt(line, token, '<', Token::Lshift)
+            },
+            Some(&'>') =>
+            {
+               let token = match_one(line, Token::GT);
+               match_pair_eq_opt(line, token, '>', Token::Rshift)
+            },
+            Some(&'-') =>
+            {
+               let token = match_one(line, Token::Minus);
+               let token = match_pair_opt(token, line, '=', Token::AssignMinus);
+               if token == Token::Minus
+               {
+                  match_pair_opt(token, line, '>', Token::Arrow)
+               }
+               else
+               {
+                  token
+               }
+            },
+            Some(&'!') =>
+            {
+               // consume character
+               line.chars.next();
+               match line.chars.peek()
+               {
+                  Some(&'=') => match_one(line, Token::NE),
+                  _ => return (line.number, Err(Error::InvalidSymbol('!'))),
+               }
+            }
+            Some(&'.') =>
+            {
+               // consume character
+               line.chars.next();
+               match line.chars.peek()
+               {
+                  Some(&'.') => match line.chars.peek_at(1)
+                  {
+                     Some(&'.') =>
+                     {
+                        line.chars.next();
+                        line.chars.next();
+                        Token::Ellipsis
+                     },
+                     _ => Token::Dot,
+                  },
+                  _ => Token::Dot, 
+               }
+            }
+            Some(&c) => return (line.number, Err(Error::InvalidSymbol(c))),
+            _ => return (line.number,
+               Err(Error::Internal("error processing symbol".to_string()))),
+         };
+
+      (line.number, Ok(result))
+   }
+
+   fn process_end_of_line(&mut self, line: Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   {
+      if self.open_braces == 0
+      {
+         (Some((line.number, Ok(Token::Newline))), None)
+      }
+      else
+      {
+         let newline = self.lines.next();
+         self.next_token_line(newline)
       }
    }
 }
@@ -1327,113 +1412,6 @@ fn build_img_float(token: ResultToken, line: &mut Line)
    Ok(Token::Imaginary(token_str))
 }
 
-fn process_symbols(mut line: Line)
-   -> (Option<(usize, ResultToken)>, Option<Line>)
-{
-   let result = build_symbol(&mut line);
-   (Some(result), Some(line))
-}
-
-fn build_symbol(line: &mut Line)
-   -> (usize, ResultToken)
-{
-   let result =
-      match line.chars.peek()
-      {
-         Some(&'(') => match_one(line, Token::Lparen),
-         Some(&')') => match_one(line, Token::Rparen),
-         Some(&'[') => match_one(line, Token::Lbracket),
-         Some(&']') => match_one(line, Token::Rbracket),
-         Some(&'{') => match_one(line, Token::Lbrace),
-         Some(&'}') => match_one(line, Token::Rbrace),
-         Some(&',') => match_one(line, Token::Comma),
-         Some(&':') => match_one(line, Token::Colon),
-         Some(&';') => match_one(line, Token::Semi),
-         Some(&'~') => match_one(line, Token::BitNot),
-         Some(&'=') => match_pair_opt(
-            match_one(line, Token::Assign), line, '=', Token::EQ),
-         Some(&'@') => match_pair_opt(
-            match_one(line, Token::At), line, '=', Token::AssignAt),
-         Some(&'%') => match_pair_opt(
-            match_one(line, Token::Mod), line, '=', Token::AssignMod),
-         Some(&'&') => match_pair_opt(
-            match_one(line, Token::BitAnd), line, '=', Token::AssignBitAnd),
-         Some(&'|') => match_pair_opt(
-            match_one(line, Token::BitOr), line, '=', Token::AssignBitOr),
-         Some(&'^') => match_pair_opt(
-            match_one(line, Token::BitXor), line, '=', Token::AssignBitXor),
-         Some(&'+') => match_pair_opt(
-            match_one(line, Token::Plus), line, '=', Token::AssignPlus),
-         Some(&'*') =>
-         {
-            let token = match_one(line, Token::Times);
-            match_pair_eq_opt(line, token, '*', Token::Exponent)
-         },
-         Some(&'/') =>
-         {
-            let token = match_one(line, Token::Divide);
-            match_pair_eq_opt(line, token, '/', Token::DivideFloor)
-         },
-         Some(&'<') =>
-         {
-            let token = match_one(line, Token::LT);
-            match_pair_eq_opt(line, token, '<', Token::Lshift)
-         },
-         Some(&'>') =>
-         {
-            let token = match_one(line, Token::GT);
-            match_pair_eq_opt(line, token, '>', Token::Rshift)
-         },
-         Some(&'-') =>
-         {
-            let token = match_one(line, Token::Minus);
-            let token = match_pair_opt(token, line, '=', Token::AssignMinus);
-            if token == Token::Minus
-            {
-               match_pair_opt(token, line, '>', Token::Arrow)
-            }
-            else
-            {
-               token
-            }
-         },
-         Some(&'!') =>
-         {
-            // consume character
-            line.chars.next();
-            match line.chars.peek()
-            {
-               Some(&'=') => match_one(line, Token::NE),
-               _ => return (line.number, Err(Error::InvalidSymbol('!'))),
-            }
-         }
-         Some(&'.') =>
-         {
-            // consume character
-            line.chars.next();
-            match line.chars.peek()
-            {
-               Some(&'.') => match line.chars.peek_at(1)
-               {
-                  Some(&'.') =>
-                  {
-                     line.chars.next();
-                     line.chars.next();
-                     Token::Ellipsis
-                  },
-                  _ => Token::Dot,
-               },
-               _ => Token::Dot, 
-            }
-         }
-         Some(&c) => return (line.number, Err(Error::InvalidSymbol(c))),
-         _ => return (line.number,
-            Err(Error::Internal("error processing symbol".to_string()))),
-      };
-
-   (line.number, Ok(result))
-}
-
 fn match_one(line: &mut Line, tk: Token)
    -> Token
 {
@@ -1471,12 +1449,6 @@ fn consume_space_to_next(current_line: &mut Line)
    {
       current_line.chars.next();
    }
-}
-
-fn process_newline(line: Line)
-   -> (Option<(usize, ResultToken)>, Option<Line>)
-{
-   (Some((line.number, Ok(Token::Newline))), None)
 }
 
 fn consume_and_while<P>(mut token_str: String, line: &mut Line, predicate: P)
@@ -1558,100 +1530,13 @@ fn is_xid_continue(c: char)
    c.is_alphanumeric() || c == '_'
 }
 
-trait ResultQuery
-{
-   fn is_indent(&self) -> bool;
-   fn is_dedent(&self) -> bool;
-   fn is_dedent_error(&self) -> bool;
-   fn is_open_grouper(&self) -> bool;
-   fn is_close_grouper(&self) -> bool;
-   fn is_newline(&self) -> bool;
-}
 
-impl ResultQuery for Option<(usize, ResultToken)>
-{
-   fn is_indent(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Indent))
-   }
 
-   fn is_dedent(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Dedent))
-   }
-
-   fn is_dedent_error(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false,
-         |&(_, ref res)| res == &Err(Error::Dedent))
-   }
-
-   fn is_open_grouper(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false,
-         |&(_, ref res)| res == &Ok(Token::Lparen) ||
-            res == &Ok(Token::Lbrace) || res == &Ok(Token::Lbracket))
-   }
-
-   fn is_close_grouper(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false,
-         |&(_, ref res)| res == &Ok(Token::Rparen) ||
-            res == &Ok(Token::Rbrace) || res == &Ok(Token::Rbracket))
-   }
-
-   fn is_newline(&self)
-      -> bool
-   {
-      self.as_ref().map_or(false, |&(_, ref res)| res == &Ok(Token::Newline))
-   }
-}
-
-impl ResultQuery for (usize, ResultToken)
-{
-   fn is_indent(&self)
-      -> bool
-   {
-      self.1 == Ok(Token::Indent)
-   }
-
-   fn is_dedent(&self)
-      -> bool
-   {
-      self.1 == Ok(Token::Dedent)
-   }
-
-   fn is_dedent_error(&self)
-      -> bool
-   {
-      self.1 == Err(Error::Dedent)
-   }
-
-   fn is_open_grouper(&self)
-      -> bool
-   {
-      self.1 == Ok(Token::Lparen) || self.1 == Ok(Token::Lbrace)
-         || self.1 == Ok(Token::Lbracket)
-   }
-
-   fn is_close_grouper(&self)
-      -> bool
-   {
-      self.1 == Ok(Token::Rparen) || self.1 == Ok(Token::Rbrace)
-         || self.1 == Ok(Token::Rbracket)
-   }
-
-   fn is_newline(&self)
-      -> bool
-   {
-      self.1 == Ok(Token::Newline)
-   }
-}
+/*
+   -----------------------------------------------------------------
+   ----------------------- TESTS BELOW HERE ------------------------
+   -----------------------------------------------------------------
+*/
 
 #[cfg(test)]
 mod tests
@@ -2166,6 +2051,16 @@ mod tests
    #[test]
    fn test_implicit_3()
    {
+      let chars = "('abc' \n      'def' \n)";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
+   }
+
+   #[test]
+   fn test_implicit_4()
+   {
       let chars = "def abc(a, g,\n         c):\n   first";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Def))));
@@ -2181,6 +2076,29 @@ mod tests
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((3, Ok(Token::Identifier("first".to_string())))));
-      assert_eq!(l.next(), Some((4, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
+   }
+
+   #[test]
+   fn test_implicit_5()
+   {
+      let chars = "('abc'\n   #  'def' \n)";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
+   }
+
+   #[test]
+   fn test_implicit_6()
+   {
+      let chars = "'abc'\n   #  'def' \n123\n";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("123".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
+      assert_eq!(l.next(), None);
    }
 }
