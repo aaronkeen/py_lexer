@@ -2162,4 +2162,25 @@ mod tests
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((7, Ok(Token::DecInteger("2".to_string())))));
    }
+
+   #[test]
+   fn test_implicit_3()
+   {
+      let chars = "def abc(a, g,\n         c):\n   first";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::Def))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("a".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("g".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Identifier("c".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Rparen))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Colon))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Indent))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Identifier("first".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Dedent))));
+   }
 }
