@@ -94,7 +94,6 @@ pub enum Token
    HexInteger(String),
    Float(String),
    Imaginary(String),
-   Endmarker,
 }
 
 impl Token
