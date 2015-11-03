@@ -2140,6 +2140,14 @@ mod tests
    }
 
    #[test]
+   fn test_byte_strings_8()
+   {
+      let chars = "Br'abc\\' \\\n  \t' bR' 123'";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
+   }
+
+   #[test]
    fn test_implicit_1()
    {
       let chars = "(1 + \n      2 \n)";
