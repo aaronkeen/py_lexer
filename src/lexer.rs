@@ -300,7 +300,7 @@ impl <'a> InternalLexer<'a>
             match current_line.chars.peek()
             {
                Some(&'#') => process_newline(current_line),
-               Some(&'u') | Some(&'U') | Some(&'r') | Some(&'R') =>
+               Some(&'u') | Some(&'U') =>
                {
                   if current_line.chars.peek_at(1).map_or(false,
                      |&c| c == '\'' || c == '"')
@@ -312,10 +312,33 @@ impl <'a> InternalLexer<'a>
                      process_identifier(current_line)
                   }
                },
-               Some(&'b') | Some(&'B') =>
+               Some(&'r') | Some(&'R') =>
                {
                   if current_line.chars.peek_at(1).map_or(false,
                      |&c| c == '\'' || c == '"')
+                  {
+                     self.process_string(current_line)
+                  }
+                  else if current_line.chars.peek_at(1).map_or(false,
+                        |&c| c == 'b' || c == 'B') &&
+                     current_line.chars.peek_at(2).map_or(false,
+                        |&c| c == '\'' || c == '"')
+                  {
+                     self.process_byte_string(current_line)
+                  }
+                  else
+                  {
+                     process_identifier(current_line)
+                  }
+               },
+               Some(&'b') | Some(&'B') =>
+               {
+                  if current_line.chars.peek_at(1).map_or(false,
+                     |&c| c == '\'' || c == '"') ||
+                     (current_line.chars.peek_at(1).map_or(false,
+                        |&c| c == 'r' || c == 'R') &&
+                        current_line.chars.peek_at(2).map_or(false,
+                           |&c| c == '\'' || c == '"'))
                   {
                      self.process_byte_string(current_line)
                   }
@@ -405,21 +428,20 @@ impl <'a> InternalLexer<'a>
    fn process_byte_string(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
-      if line.chars.peek().map_or(false, |&c| c == 'b' || c == 'B')
-      {
-         line.chars.next();   // skip prefix
-      }
+      let is_raw;
 
-      let is_raw = if line.chars.peek()
-         .map_or(false, |&c| c == 'r' || c == 'R')
-         {
-            line.chars.next();
-            true
-         }
-         else
-         {
-            false
-         };
+      if line.chars.peek_at(1).map_or(false, |&c| c == 'r' || c == 'R') ||
+         line.chars.peek().map_or(false, |&c| c == 'r' || c == 'R')
+      {
+         line.chars.next();   // skip prefix b/B or r/R
+         line.chars.next();   // skip prefix b/B or r/R
+         is_raw = true;
+      }
+      else
+      {
+         line.chars.next();   // skip prefix b/B
+         is_raw = false;
+      }
 
       let quote = line.chars.next().unwrap();
       let is_long_string = line.chars.peek().map_or(false, |&c| c == quote) &&
@@ -2104,9 +2126,17 @@ mod tests
    #[test]
    fn test_byte_strings_6()
    {
-      let chars = "b'abc\\\n  \t 123' b'123'";
+      let chars = "b'abc\\\n  \t 123' \\\n  b'123'";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 32, 32, 9, 32, 49, 50, 51, 49, 50, 51])))));
+   }
+
+   #[test]
+   fn test_byte_strings_7()
+   {
+      let chars = "rb'abc\\' \\\n  \t 123'";
+      let mut l = Lexer::new(chars.lines());
+      assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
    }
 
    #[test]
