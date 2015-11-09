@@ -11,6 +11,7 @@ pub enum Token
    As,
    Assert,
    Async,
+   Await,
    Break,
    Class,
    Continue,
@@ -183,7 +184,7 @@ pub fn keyword_lookup(token_str: String)
    return Token::Identifier(token_str)
 }
 
-const KEYWORDS : [(&'static str, Token); 34] =
+const KEYWORDS : [(&'static str, Token); 35] =
    [
       ("False", Token::False),
       ("None", Token::None),
@@ -192,6 +193,7 @@ const KEYWORDS : [(&'static str, Token); 34] =
       ("as", Token::As),
       ("assert", Token::Assert),
       ("async", Token::Async),
+      ("await", Token::Await),
       ("break", Token::Break),
       ("class", Token::Class),
       ("continue", Token::Continue),
@@ -221,7 +223,7 @@ const KEYWORDS : [(&'static str, Token); 34] =
       ("yield", Token::Yield),
    ];
 
-const LEXEMES : [(Token, &'static str); 85] =
+const LEXEMES : [(Token, &'static str); 86] =
    [
       (Token::Newline, "\n"),
       (Token::Indent, "INDENT"),
@@ -233,6 +235,7 @@ const LEXEMES : [(Token, &'static str); 85] =
       (Token::As, "as"),
       (Token::Assert, "assert"),
       (Token::Async, "async"),
+      (Token::Await, "await"),
       (Token::Break, "break"),
       (Token::Class, "class"),
       (Token::Continue, "continue"),
