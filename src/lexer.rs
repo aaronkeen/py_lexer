@@ -1713,8 +1713,10 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::And))));
       assert_eq!(l.next(), Some((1, Ok(Token::As))));
       assert_eq!(l.next(), Some((1, Ok(Token::Assert))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Async))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Await))));
+      //assert_eq!(l.next(), Some((1, Ok(Token::Async))));
+      //assert_eq!(l.next(), Some((1, Ok(Token::Await))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("async".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("await".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Break))));
       assert_eq!(l.next(), Some((1, Ok(Token::Class))));
       assert_eq!(l.next(), Some((1, Ok(Token::Continue))));
