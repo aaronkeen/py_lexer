@@ -1702,7 +1702,7 @@ mod tests
    #[test]
    fn test_keywords()
    {
-      let chars = "false False None True and as assert break class continue def del defdel elif else except finally for from \nglobal if import in is lambda nonlocal not or pass raise return try while with yield\n";
+      let chars = "false False None True and as assert async break class continue def del defdel elif else except finally for from \nglobal if import in is lambda nonlocal not or pass raise return try while with yield\n";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("false".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::False))));
@@ -1711,6 +1711,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::And))));
       assert_eq!(l.next(), Some((1, Ok(Token::As))));
       assert_eq!(l.next(), Some((1, Ok(Token::Assert))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Async))));
       assert_eq!(l.next(), Some((1, Ok(Token::Break))));
       assert_eq!(l.next(), Some((1, Ok(Token::Class))));
       assert_eq!(l.next(), Some((1, Ok(Token::Continue))));
