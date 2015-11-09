@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq, Clone)]
-pub enum Error
+pub enum LexerError
 {
    BadLineContinuation,
    UnterminatedTripleString,
@@ -17,32 +17,35 @@ pub enum Error
    Internal(String),
 }
 
-impl Error
+impl LexerError
 {
    pub fn message(self)
       -> String
    {
       match self
       {
-         Error::BadLineContinuation => "bad line continuation".to_string(),
-         Error::UnterminatedTripleString =>
+         LexerError::BadLineContinuation =>
+            "bad line continuation".to_string(),
+         LexerError::UnterminatedTripleString =>
             "unterminated triple-quoted string".to_string(),
-         Error::UnterminatedString => "unterminated string".to_string(),
-         Error::InvalidCharacter(c) => format!("invalid character {}", c),
-         Error::Dedent => "misaligned dedent".to_string(),
-         Error::HexEscapeShort => "missing digits in hex escape".to_string(),
-         Error::MalformedUnicodeEscape =>
+         LexerError::UnterminatedString => "unterminated string".to_string(),
+         LexerError::InvalidCharacter(c) => format!("invalid character {}", c),
+         LexerError::Dedent => "misaligned dedent".to_string(),
+         LexerError::HexEscapeShort =>
+            "missing digits in hex escape".to_string(),
+         LexerError::MalformedUnicodeEscape =>
             "malformed unicode escape".to_string(),
-         Error::MalformedNamedUnicodeEscape =>
+         LexerError::MalformedNamedUnicodeEscape =>
             "malformed named unicode escape".to_string(),
-         Error::UnknownUnicodeName(s) =>
+         LexerError::UnknownUnicodeName(s) =>
             format!("unknown unicode name '{}'", s),
-         Error::MissingDigits => "missing digits".to_string(),
-         Error::MalformedFloat =>
+         LexerError::MissingDigits => "missing digits".to_string(),
+         LexerError::MalformedFloat =>
             "malformed floating point number".to_string(),
-         Error::MalformedImaginary => "malformed imaginary number".to_string(),
-         Error::InvalidSymbol(c) => format!("invalid symbol '{}'", c),
-         Error::Internal(s) => format!("internal error: {}", s),
+         LexerError::MalformedImaginary =>
+            "malformed imaginary number".to_string(),
+         LexerError::InvalidSymbol(c) => format!("invalid symbol '{}'", c),
+         LexerError::Internal(s) => format!("internal error: {}", s),
       }
    }
 }

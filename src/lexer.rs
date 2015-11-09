@@ -13,12 +13,12 @@ use std::str::Chars;
 use std::iter::Peekable;
 use iter::MultiPeekable;
 use tokens::{Token, keyword_lookup};
-use errors::Error;
+use errors::LexerError;
 
 
 const TAB_STOP_SIZE: u32 = 8;
 
-pub type ResultToken = Result<Token, Error>;
+pub type ResultToken = Result<Token, LexerError>;
 
 pub struct Lexer<'a>
 {
@@ -334,7 +334,7 @@ impl <'a> InternalLexer<'a>
       else
       {
          let line_number = current_line.number;
-         (Some((line_number, Err(Error::BadLineContinuation))),
+         (Some((line_number, Err(LexerError::BadLineContinuation))),
             Some(current_line))
       }
    }
@@ -423,10 +423,10 @@ impl <'a> InternalLexer<'a>
                      return (Some((num, Err(msg))), new_line),
                   (num, Ok(_), None) if is_long_string =>
                      return (Some((num + 1,
-                        Err(Error::UnterminatedTripleString))), None),
+                        Err(LexerError::UnterminatedTripleString))), None),
                   (num, Ok(_), None) =>
                      return (Some((num + 1,
-                        Err(Error::UnterminatedString))), None),
+                        Err(LexerError::UnterminatedString))), None),
                }
             },
             Some(cur_char) if cur_char == quote =>
@@ -463,11 +463,11 @@ impl <'a> InternalLexer<'a>
                      current_line = line;
                   },
                   _ => return (Some((line_number + 1,
-                        Err(Error::UnterminatedTripleString))), None)
+                        Err(LexerError::UnterminatedTripleString))), None)
                }
             },
             None => return (Some((current_line.number,
-                     Err(Error::UnterminatedString))),
+                     Err(LexerError::UnterminatedString))),
                      Some(current_line)),
          }
       }
@@ -509,10 +509,10 @@ impl <'a> InternalLexer<'a>
                      return (Some((num, Err(msg))), new_line),
                   (num, Ok(_), None) if is_long_string =>
                      return (Some((num + 1,
-                        Err(Error::UnterminatedTripleString))), None),
+                        Err(LexerError::UnterminatedTripleString))), None),
                   (num, Ok(_), None) =>
                      return (Some((num + 1,
-                        Err(Error::UnterminatedString))), None),
+                        Err(LexerError::UnterminatedString))), None),
                }
             },
             Some(cur_char) if cur_char == quote =>
@@ -552,11 +552,11 @@ impl <'a> InternalLexer<'a>
                      current_line = line;
                   },
                   _ => return (Some((line_number + 1,
-                        Err(Error::UnterminatedTripleString))), None)
+                        Err(LexerError::UnterminatedTripleString))), None)
                }
             },
             None => return (Some((current_line.number,
-                     Err(Error::UnterminatedString))), Some(current_line)),
+                     Err(LexerError::UnterminatedString))), Some(current_line)),
          }
       }
 
@@ -566,7 +566,7 @@ impl <'a> InternalLexer<'a>
 
    fn process_escape_sequence(&mut self, current_line: Line<'a>,
       mut token_str: String, is_raw: bool)
-      -> (usize, Result<String, Error>, Option<Line<'a>>)
+      -> (usize, Result<String, LexerError>, Option<Line<'a>>)
    {
       let line_number = current_line.number;
       let (new_line, new_token_res) =
@@ -584,7 +584,7 @@ impl <'a> InternalLexer<'a>
 
    fn handle_escaped_character(&mut self, mut line: Line<'a>,
       mut token_str: String, is_raw: bool)
-      -> (Option<Line<'a>>, Result<String,Error>)
+      -> (Option<Line<'a>>, Result<String,LexerError>)
    {
       match line.chars.next()
       {
@@ -691,7 +691,7 @@ impl <'a> InternalLexer<'a>
 
    fn process_escape_sequence_byte(&mut self, current_line: Line<'a>,
       mut token_vec: Vec<u8>, is_raw: bool)
-      -> (usize, Result<Vec<u8>, Error>, Option<Line<'a>>)
+      -> (usize, Result<Vec<u8>, LexerError>, Option<Line<'a>>)
    {
       let line_number = current_line.number;
       let (new_line, new_token_res) =
@@ -709,7 +709,7 @@ impl <'a> InternalLexer<'a>
 
    fn handle_escaped_character_byte(&mut self, mut line: Line<'a>,
       mut token_vec: Vec<u8>, is_raw: bool)
-      -> (Option<Line<'a>>, Result<Vec<u8>, Error>)
+      -> (Option<Line<'a>>, Result<Vec<u8>, LexerError>)
    {
       match line.chars.next()
       {
@@ -798,7 +798,7 @@ impl <'a> InternalLexer<'a>
             token_vec.push(c as u8);
             (Some(line), Ok(token_vec))
          },
-         Some(c) => (Some(line), Err(Error::InvalidCharacter(c))),
+         Some(c) => (Some(line), Err(LexerError::InvalidCharacter(c))),
       }
    }
 
@@ -850,7 +850,7 @@ impl <'a> InternalLexer<'a>
       if self.dedent_count == -1
       {
          self.dedent_count = 0;
-         (Some((current_line.number, Err(Error::Dedent))),
+         (Some((current_line.number, Err(LexerError::Dedent))),
             Some(current_line))
       }
       else
@@ -961,7 +961,8 @@ impl <'a> InternalLexer<'a>
                match line.chars.peek()
                {
                   Some(&'=') => match_one(line, Token::NE),
-                  _ => return (line.number, Err(Error::InvalidSymbol('!'))),
+                  _ => return (line.number,
+                        Err(LexerError::InvalidSymbol('!'))),
                }
             }
             Some(&'.') =>
@@ -983,9 +984,10 @@ impl <'a> InternalLexer<'a>
                   _ => Token::Dot, 
                }
             }
-            Some(&c) => return (line.number, Err(Error::InvalidSymbol(c))),
+            Some(&c) => return (line.number, Err(LexerError::InvalidSymbol(c))),
             _ => return (line.number,
-               Err(Error::Internal("error processing symbol".to_string()))),
+               Err(LexerError::Internal(
+                  "error processing symbol".to_string()))),
          };
 
       (line.number, Ok(result))
@@ -1069,7 +1071,7 @@ fn build_dot_prefixed(line: &mut Line)
          let result = build_img_float(result, line);
          result
       },
-      _ => Err(Error::Internal("dot".to_string()))
+      _ => Err(LexerError::Internal("dot".to_string()))
    }
 }
 
@@ -1129,7 +1131,7 @@ fn build_zero_prefixed_number(line: &mut Line)
 }
 
 fn push_octal_character(mut line: Line, mut token_str: String, c: char)
-   -> (Option<Line>, Result<String, Error>)
+   -> (Option<Line>, Result<String, LexerError>)
 {
    let mut octal = String::new();
    octal.push(c);
@@ -1153,7 +1155,7 @@ fn push_octal_character(mut line: Line, mut token_str: String, c: char)
 }
 
 fn push_hex_character(mut line: Line, mut token_str: String)
-   -> (Option<Line>, Result<String, Error>)
+   -> (Option<Line>, Result<String, LexerError>)
 {
    match build_n_while(&mut line, 2, |c| c.is_digit(16))
    {
@@ -1163,13 +1165,13 @@ fn push_hex_character(mut line: Line, mut token_str: String)
          token_str.push(char::from_u32(v).unwrap());
          (Some(line), Ok(token_str))
       },
-      None => (Some(line), Err(Error::HexEscapeShort)),
+      None => (Some(line), Err(LexerError::HexEscapeShort)),
    }
 }
 
 fn push_unicode_character(mut line: Line, mut token_str: String,
    num_digits: u32)
-   -> (Option<Line>, Result<String, Error>)
+   -> (Option<Line>, Result<String, LexerError>)
 {
    match build_n_while(&mut line, num_digits, |c| c.is_digit(16))
    {
@@ -1179,16 +1181,16 @@ fn push_unicode_character(mut line: Line, mut token_str: String,
          token_str.push(char::from_u32(v).unwrap());
          (Some(line), Ok(token_str))
       },
-      None => (Some(line), Err(Error::MalformedUnicodeEscape)),
+      None => (Some(line), Err(LexerError::MalformedUnicodeEscape)),
    }
 }
 
 fn push_named_character(mut line: Line, mut token_str: String)
-   -> (Option<Line>, Result<String, Error>)
+   -> (Option<Line>, Result<String, LexerError>)
 {
    if !line.chars.peek().map_or(false, |&c| c == '{')
    {
-      return (Some(line), Err(Error::MalformedNamedUnicodeEscape));
+      return (Some(line), Err(LexerError::MalformedNamedUnicodeEscape));
    }
 
    line.chars.next();   // consume {
@@ -1201,7 +1203,7 @@ fn push_named_character(mut line: Line, mut token_str: String)
 
    if !line.chars.peek().map_or(false, |&c| c == '}')
    {
-      return (Some(line), Err(Error::MalformedNamedUnicodeEscape));
+      return (Some(line), Err(LexerError::MalformedNamedUnicodeEscape));
    }
 
    line.chars.next(); // consume }
@@ -1212,12 +1214,12 @@ fn push_named_character(mut line: Line, mut token_str: String)
          token_str.push(c);
          (Some(line), Ok(token_str))
       },
-      _ => (Some(line), Err(Error::UnknownUnicodeName(named))),
+      _ => (Some(line), Err(LexerError::UnknownUnicodeName(named))),
    }
 }
 
 fn push_octal_character_byte(mut line: Line, mut token_vec: Vec<u8>, c: char)
-   -> (Option<Line>, Result<Vec<u8>, Error>)
+   -> (Option<Line>, Result<Vec<u8>, LexerError>)
 {
    let mut octal = String::new();
    octal.push(c);
@@ -1241,7 +1243,7 @@ fn push_octal_character_byte(mut line: Line, mut token_vec: Vec<u8>, c: char)
 }
 
 fn push_hex_character_byte(mut line: Line, mut token_vec: Vec<u8>)
-   -> (Option<Line>, Result<Vec<u8>, Error>)
+   -> (Option<Line>, Result<Vec<u8>, LexerError>)
 {
    match build_n_while(&mut line, 2, |c| c.is_digit(16))
    {
@@ -1251,7 +1253,7 @@ fn push_hex_character_byte(mut line: Line, mut token_vec: Vec<u8>)
          token_vec.push(v as u8);
          (Some(line), Ok(token_vec))
       }
-      None => (Some(line), Err(Error::HexEscapeShort))
+      None => (Some(line), Err(LexerError::HexEscapeShort))
    }
 }
 
@@ -1281,7 +1283,7 @@ fn require_radix_digits<F>(token_str: String, line: &mut Line,
       Some(&c) if c.is_digit(radix) =>
          Ok(token_type(consume_and_while(token_str, line,
             |c| c.is_digit(radix)))),
-      _ => Err(Error::MissingDigits)
+      _ => Err(LexerError::MissingDigits)
    }
 }
 
@@ -1308,7 +1310,7 @@ fn require_float_part(token: ResultToken, line: &mut Line)
 
    if !float_part
    {
-      Err(Error::MalformedFloat)
+      Err(LexerError::MalformedFloat)
    }
    else
    {
@@ -1333,7 +1335,7 @@ fn build_point_float(token: ResultToken, line: &mut Line)
    match token
    {
       Ok(ref t) if t.is_decimal_integer() => (),
-      _ => return Err(Error::MalformedFloat)
+      _ => return Err(LexerError::MalformedFloat)
    }
 
    let mut token_str = token.unwrap().lexeme();
@@ -1368,7 +1370,7 @@ fn build_exp_float(token: ResultToken, line: &mut Line)
    match token
    {
       Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-      _ => return Err(Error::MalformedFloat)
+      _ => return Err(LexerError::MalformedFloat)
    }
 
    let mut token_str = token.unwrap().lexeme();
@@ -1402,7 +1404,7 @@ fn build_img_float(token: ResultToken, line: &mut Line)
    match token
    {
       Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-      _ => return Err(Error::MalformedImaginary)
+      _ => return Err(LexerError::MalformedImaginary)
    }
 
    let mut token_str = token.unwrap().lexeme();
@@ -1543,7 +1545,7 @@ mod tests
 {
    use super::Lexer;
    use tokens::Token;
-   use errors::Error;
+   use errors::LexerError;
 
    #[test]
    fn test_identifiers()
@@ -1563,7 +1565,7 @@ mod tests
       assert_eq!(l.next(), Some((5, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((5, Ok(Token::Identifier("n12".to_string())))));
       assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n3".to_string())))));
-      assert_eq!(l.next(), Some((6, Err(Error::BadLineContinuation))));
+      assert_eq!(l.next(), Some((6, Err(LexerError::BadLineContinuation))));
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((7, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n23".to_string())))));
@@ -1571,7 +1573,7 @@ mod tests
       assert_eq!(l.next(), Some((8, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((8, Ok(Token::Identifier("n24".to_string())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((9, Err(Error::Dedent))));
+      assert_eq!(l.next(), Some((9, Err(LexerError::Dedent))));
       assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_string())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
@@ -1598,14 +1600,14 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Float("12E-17".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("0".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("00000".to_string())))));
-      assert_eq!(l.next(), Some((1, Err(Error::MalformedFloat))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedFloat))));
       assert_eq!(l.next(), Some((1, Ok(Token::Float("0.2".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("e12".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::OctInteger("0o724".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0X32facb7".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::BinInteger("0b10101010".to_string())))));
-      assert_eq!(l.next(), Some((1, Err(Error::MissingDigits))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MissingDigits))));
       assert_eq!(l.next(), Some((1, Ok(Token::Float("00000e+00000".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("79228162514264337593543950336".to_string())))));
       assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0xdeadbeef".to_string())))));
@@ -1636,7 +1638,7 @@ mod tests
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
-      assert_eq!(l.next(), Some((7, Err(Error::Dedent))));
+      assert_eq!(l.next(), Some((7, Err(LexerError::Dedent))));
       assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n2".to_string())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
    }   
@@ -1695,7 +1697,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::GE))));
       assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
       assert_eq!(l.next(), Some((1, Ok(Token::NE))));
-      assert_eq!(l.next(), Some((1, Err(Error::InvalidSymbol('!')))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol('!')))));
       assert_eq!(l.next(), Some((1, Ok(Token::Ellipsis))));
    }
 
@@ -1754,13 +1756,13 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Err(Error::UnterminatedString))));
+      assert_eq!(l.next(), Some((3, Err(LexerError::UnterminatedString))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((4, Ok(Token::String("last line".to_string())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((5, Ok(Token::String("just   kidding    \t kids".to_string())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((9, Err(Error::UnterminatedString))));
+      assert_eq!(l.next(), Some((9, Err(LexerError::UnterminatedString))));
    }
 
    #[test]
@@ -1785,7 +1787,7 @@ mod tests
       assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((6, Ok(Token::String("abc \tdef123".to_string())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((11, Err(Error::UnterminatedTripleString))));
+      assert_eq!(l.next(), Some((11, Err(LexerError::UnterminatedTripleString))));
    }
 
    #[test]
@@ -1836,7 +1838,7 @@ mod tests
    {
       let chars = "'\\x'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::HexEscapeShort))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
    }
 
    #[test]
@@ -1844,7 +1846,7 @@ mod tests
    {
       let chars = "'\\x7'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::HexEscapeShort))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
    }
 
    #[test]
@@ -1862,7 +1864,7 @@ mod tests
    {
       let chars = "'\\N{monkey'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::MalformedNamedUnicodeEscape))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
    }
 
    #[test]
@@ -1870,7 +1872,7 @@ mod tests
    {
       let chars = "'\\Nmonkey'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::MalformedNamedUnicodeEscape))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
    }
 
    #[test]
@@ -1878,7 +1880,7 @@ mod tests
    {
       let chars = "'\\N{fhefaefi}'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::UnknownUnicodeName("fhefaefi".to_string())))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::UnknownUnicodeName("fhefaefi".to_string())))));
    }
 
    #[test]
@@ -1896,7 +1898,7 @@ mod tests
    {
       let chars = "'\\u262'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::MalformedUnicodeEscape))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedUnicodeEscape))));
    }
 
    #[test]
@@ -1904,7 +1906,7 @@ mod tests
    {
       let chars = "'\\U00002D'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(Error::MalformedUnicodeEscape))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedUnicodeEscape))));
    }
 
    #[test]
@@ -1949,7 +1951,7 @@ mod tests
    {
       let chars = "'''hello\\\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((2, Err(Error::UnterminatedTripleString))));
+      assert_eq!(l.next(), Some((2, Err(LexerError::UnterminatedTripleString))));
    }
 
    #[test]
