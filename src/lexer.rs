@@ -1,8 +1,5 @@
 /// It should be noted that indentation checks do not verify that mixed
 /// spaces and tabs do not depend on the size of a tab stop for correctness.
-///
-/// Normalize error messages
-///
 
 extern crate unicode_names;
 
