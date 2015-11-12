@@ -565,21 +565,14 @@ impl <'a> InternalLexer<'a>
    }
 
    fn process_escape_sequence(&mut self, current_line: Line<'a>,
-      mut token_str: String, is_raw: bool)
+      token_str: String, is_raw: bool)
       -> (usize, Result<String, LexerError>, Option<Line<'a>>)
    {
       let line_number = current_line.number;
       let (new_line, new_token_res) =
          self.handle_escaped_character(current_line, token_str, is_raw);
 
-      if new_token_res.is_err()
-      {
-         return (line_number, Err(new_token_res.unwrap_err()), new_line)
-      }
-
-      token_str = new_token_res.unwrap();
-
-      return (line_number, Ok(token_str), new_line)
+      return (line_number, new_token_res, new_line)
    }
 
    fn handle_escaped_character(&mut self, mut line: Line<'a>,
@@ -690,21 +683,14 @@ impl <'a> InternalLexer<'a>
    }
 
    fn process_escape_sequence_byte(&mut self, current_line: Line<'a>,
-      mut token_vec: Vec<u8>, is_raw: bool)
+      token_vec: Vec<u8>, is_raw: bool)
       -> (usize, Result<Vec<u8>, LexerError>, Option<Line<'a>>)
    {
       let line_number = current_line.number;
       let (new_line, new_token_res) =
          self.handle_escaped_character_byte(current_line, token_vec, is_raw);
 
-      if new_token_res.is_err()
-      {
-         return (line_number, Err(new_token_res.unwrap_err()), new_line)
-      }
-
-      token_vec = new_token_res.unwrap();
-
-      return (line_number, Ok(token_vec), new_line)
+      return (line_number, new_token_res, new_line)
    }
 
    fn handle_escaped_character_byte(&mut self, mut line: Line<'a>,
@@ -1085,7 +1071,6 @@ fn build_zero_prefixed_number(line: &mut Line)
    -> ResultToken
 {
    let mut token_str = String::new();
-
    token_str.push(line.chars.next().unwrap());
 
    match line.chars.peek()
@@ -1326,8 +1311,7 @@ fn build_point_float(token: ResultToken, line: &mut Line)
       return token;
    }
 
-   if line.chars.peek().is_none() ||
-      *line.chars.peek().unwrap() != '.'
+   if line.chars.peek().map_or(true, |&c| c != '.')
    {
       return token;
    }
@@ -1360,9 +1344,7 @@ fn build_exp_float(token: ResultToken, line: &mut Line)
       return token;
    }
 
-   if line.chars.peek().is_none() ||
-      (*line.chars.peek().unwrap() != 'e' &&
-      *line.chars.peek().unwrap() != 'E')
+   if line.chars.peek().map_or(true, |&c| c != 'e' && c != 'E')
    {
       return token;
    }
@@ -1394,9 +1376,7 @@ fn build_img_float(token: ResultToken, line: &mut Line)
       return token;
    }
 
-   if line.chars.peek().is_none() ||
-      (*line.chars.peek().unwrap() != 'j' &&
-      *line.chars.peek().unwrap() != 'J')
+   if line.chars.peek().map_or(true, |&c| c != 'j' && c != 'J')
    {
       return token;
    }
