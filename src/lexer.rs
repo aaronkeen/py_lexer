@@ -987,7 +987,7 @@ impl <'a> InternalLexer<'a>
             Some(&c) => return (line.number, Err(LexerError::InvalidSymbol(c))),
             _ => return (line.number,
                Err(LexerError::Internal(
-                  "error processing symbol".to_string()))),
+                  "error processing symbol".to_owned()))),
          };
 
       (line.number, Ok(result))
@@ -1071,7 +1071,7 @@ fn build_dot_prefixed(line: &mut Line)
          let result = build_img_float(result, line);
          result
       },
-      _ => Err(LexerError::Internal("dot".to_string()))
+      _ => Err(LexerError::Internal("dot".to_owned()))
    }
 }
 
@@ -1552,29 +1552,29 @@ mod tests
    {
       let chars = "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("_xyz".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("_xyz".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((3, Ok(Token::Identifier("e2f".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Identifier("e2f".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((4, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((4, Ok(Token::Identifier("mq3".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::Identifier("mq3".to_owned())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((5, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((5, Ok(Token::Dedent))));
-      assert_eq!(l.next(), Some((5, Ok(Token::Identifier("n12".to_string())))));
-      assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n3".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Identifier("n12".to_owned())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n3".to_owned())))));
       assert_eq!(l.next(), Some((6, Err(LexerError::BadLineContinuation))));
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((7, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n23".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n23".to_owned())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((8, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((8, Ok(Token::Identifier("n24".to_string())))));
+      assert_eq!(l.next(), Some((8, Ok(Token::Identifier("n24".to_owned())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((9, Err(LexerError::Dedent))));
-      assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_string())))));
+      assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_owned())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
    }   
@@ -1584,40 +1584,40 @@ mod tests
    {
       let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . 3..2\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("123".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("456".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("45".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("23.742".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("23.".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("12.".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float(".3".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float(".14".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("0123.2192".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("077e010".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("12e17".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("12e+17".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("12E-17".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("0".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("00000".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("123".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("456".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("45".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("23.742".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("23.".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("12.".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float(".3".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float(".14".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("0123.2192".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("077e010".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("12e17".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("12e+17".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("12E-17".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("0".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("00000".to_owned())))));
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedFloat))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("0.2".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("0.2".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("e12".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::OctInteger("0o724".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0X32facb7".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::BinInteger("0b10101010".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("e12".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::OctInteger("0o724".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0X32facb7".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::BinInteger("0b10101010".to_owned())))));
       assert_eq!(l.next(), Some((1, Err(LexerError::MissingDigits))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("00000e+00000".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("79228162514264337593543950336".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0xdeadbeef".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("037j".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.3j".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.j".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary(".3j".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("00000e+00000".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("79228162514264337593543950336".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0xdeadbeef".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("037j".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.3j".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary("2.j".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Imaginary(".3j".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float("3.".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Float(".2".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float("3.".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Float(".2".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }   
 
@@ -1627,19 +1627,19 @@ mod tests
       let chars = "    abf xyz\n\n\n\n        e2f\n             n12\n  n2\n";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("xyz".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("xyz".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((5, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((5, Ok(Token::Identifier("e2f".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::Identifier("e2f".to_owned())))));
       assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((6, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n12".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::Identifier("n12".to_owned())))));
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
       assert_eq!(l.next(), Some((7, Err(LexerError::Dedent))));
-      assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n2".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::Identifier("n2".to_owned())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
    }   
 
@@ -1706,7 +1706,7 @@ mod tests
    {
       let chars = "false False None True and as assert async await break class continue def del defdel elif else except finally for from \nglobal if import in is lambda nonlocal not or pass raise return try while with yield\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("false".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("false".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::False))));
       assert_eq!(l.next(), Some((1, Ok(Token::None))));
       assert_eq!(l.next(), Some((1, Ok(Token::True))));
@@ -1715,14 +1715,14 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Assert))));
       //assert_eq!(l.next(), Some((1, Ok(Token::Async))));
       //assert_eq!(l.next(), Some((1, Ok(Token::Await))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("async".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("await".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("async".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("await".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Break))));
       assert_eq!(l.next(), Some((1, Ok(Token::Class))));
       assert_eq!(l.next(), Some((1, Ok(Token::Continue))));
       assert_eq!(l.next(), Some((1, Ok(Token::Def))));
       assert_eq!(l.next(), Some((1, Ok(Token::Del))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("defdel".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("defdel".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Elif))));
       assert_eq!(l.next(), Some((1, Ok(Token::Else))));
       assert_eq!(l.next(), Some((1, Ok(Token::Except))));
@@ -1754,15 +1754,15 @@ mod tests
    {
       let chars = "'abc 123 \txyz@\")#*)@'\n\"wfe wf w fwe'fwefw\"\n\"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\nxyz'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("wfe wf w fwe'fwefw".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("wfe wf w fwe'fwefw".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Err(LexerError::UnterminatedString))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((4, Ok(Token::String("last line".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("last line".to_owned())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((5, Ok(Token::String("just   kidding    \t kids".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::String("just   kidding    \t kids".to_owned())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((9, Err(LexerError::UnterminatedString))));
    }
@@ -1772,7 +1772,7 @@ mod tests
    {
       let chars = "'abc' \"def\" \\\n'123'\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef123".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef123".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
    }
 
@@ -1781,13 +1781,13 @@ mod tests
    {
       let chars = "''' abc ' '' '''\n\"\"\"xyz\"\"\"\n'''abc\n \tdef\n123'''\n'''abc\\\n \tdef\\\n123'''\n'''abc\ndef";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String(" abc ' '' ".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String(" abc ' '' ".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("xyz".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("xyz".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Ok(Token::String("abc\n \tdef\n123".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("abc\n \tdef\n123".to_owned())))));
       assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((6, Ok(Token::String("abc \tdef123".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::String("abc \tdef123".to_owned())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((11, Err(LexerError::UnterminatedTripleString))));
    }
@@ -1797,27 +1797,27 @@ mod tests
    {
       let chars = "'\\\\'\n'\\''\n'\\\"'\n'\\a'\n'\\b'\n'\\f'\n'\\n'\n'\\r'\n'\\t'\n'\\v'\n'\\m'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("\\".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("'".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("'".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Ok(Token::String("\"".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("\"".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_owned())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((5, Ok(Token::String("\x08".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::String("\x08".to_owned())))));
       assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((6, Ok(Token::String("\x0C".to_string())))));
+      assert_eq!(l.next(), Some((6, Ok(Token::String("\x0C".to_owned())))));
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((7, Ok(Token::String("\n".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::String("\n".to_owned())))));
       assert_eq!(l.next(), Some((7, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((8, Ok(Token::String("\r".to_string())))));
+      assert_eq!(l.next(), Some((8, Ok(Token::String("\r".to_owned())))));
       assert_eq!(l.next(), Some((8, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((9, Ok(Token::String("\t".to_string())))));
+      assert_eq!(l.next(), Some((9, Ok(Token::String("\t".to_owned())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((10, Ok(Token::String("\x0B".to_string())))));
+      assert_eq!(l.next(), Some((10, Ok(Token::String("\x0B".to_owned())))));
       assert_eq!(l.next(), Some((10, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((11, Ok(Token::String("\\m".to_string())))));
+      assert_eq!(l.next(), Some((11, Ok(Token::String("\\m".to_owned())))));
    }
 
    #[test]
@@ -1825,13 +1825,13 @@ mod tests
    {
       let chars = "'\\007'\n'\\7'\n'\\175'\n'\\x07'\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\x07".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("\x07".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Ok(Token::String("}".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::String("}".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_string())))));
+      assert_eq!(l.next(), Some((4, Ok(Token::String("\x07".to_owned())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Newline))));
    }
 
@@ -1856,9 +1856,9 @@ mod tests
    {
       let chars = "'\\N{monkey}'\n'\\N{BLACK STAR}'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("🐒".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("🐒".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("★".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("★".to_owned())))));
    }
 
    #[test]
@@ -1882,7 +1882,7 @@ mod tests
    {
       let chars = "'\\N{fhefaefi}'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Err(LexerError::UnknownUnicodeName("fhefaefi".to_string())))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::UnknownUnicodeName("fhefaefi".to_owned())))));
    }
 
    #[test]
@@ -1890,9 +1890,9 @@ mod tests
    {
       let chars = "'\\u262f'\n'\\U00002D5E'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("☯".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("☯".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((2, Ok(Token::String("ⵞ".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::String("ⵞ".to_owned())))));
    }
 
    #[test]
@@ -1916,7 +1916,7 @@ mod tests
    {
       let chars = "'\\u262f262f'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_owned())))));
    }
 
    #[test]
@@ -1924,11 +1924,11 @@ mod tests
    {
       let chars = "unlikely u'abc' u '123' U\"\"\"def\"\"\" u\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("unlikely".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::String("123def".to_string())))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("unlikely".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("123def".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }
 
@@ -1937,7 +1937,7 @@ mod tests
    {
       let chars = "r'\\txyz \\\n \\'fefe \\N{monkey}'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}".to_owned())))));
    }
 
    #[test]
@@ -1945,7 +1945,7 @@ mod tests
    {
       let chars = "r'''\\txyz \\\n \\'fefe \\N{monkey}''''hello\\040\\700\\300'";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello ǀÀ".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello ǀÀ".to_owned())))));
    }
 
    #[test]
@@ -2026,9 +2026,9 @@ mod tests
       let chars = "(1 + \n      2 \n)";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
-      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
    }
 
@@ -2039,19 +2039,19 @@ mod tests
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
       assert_eq!(l.next(), Some((2, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::DecInteger("2".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Plus))));
-      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("9".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("9".to_owned())))));
       assert_eq!(l.next(), Some((4, Ok(Token::Rparen))));
       assert_eq!(l.next(), Some((4, Ok(Token::Times))));
-      assert_eq!(l.next(), Some((5, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((5, Ok(Token::DecInteger("2".to_owned())))));
       assert_eq!(l.next(), Some((6, Ok(Token::Rparen))));
       assert_eq!(l.next(), Some((6, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((7, Ok(Token::Dedent))));
-      assert_eq!(l.next(), Some((7, Ok(Token::DecInteger("2".to_string())))));
+      assert_eq!(l.next(), Some((7, Ok(Token::DecInteger("2".to_owned())))));
    }
 
    #[test]
@@ -2060,7 +2060,7 @@ mod tests
       let chars = "('abc' \n      'def' \n)";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
    }
 
@@ -2070,18 +2070,18 @@ mod tests
       let chars = "def abc(a, g,\n         c):\n   first";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Def))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abc".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("a".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("a".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
-      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("g".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Identifier("g".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Comma))));
-      assert_eq!(l.next(), Some((2, Ok(Token::Identifier("c".to_string())))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Identifier("c".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Rparen))));
       assert_eq!(l.next(), Some((2, Ok(Token::Colon))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Ok(Token::Indent))));
-      assert_eq!(l.next(), Some((3, Ok(Token::Identifier("first".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::Identifier("first".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
    }
@@ -2092,7 +2092,7 @@ mod tests
       let chars = "('abc'\n   #  'def' \n)";
       let mut l = Lexer::new(chars.lines());
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
    }
 
@@ -2101,9 +2101,9 @@ mod tests
    {
       let chars = "'abc'\n   #  'def' \n123\n";
       let mut l = Lexer::new(chars.lines());
-      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_string())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("123".to_string())))));
+      assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("123".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), None);
    }

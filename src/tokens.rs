@@ -136,7 +136,7 @@ impl Token
             {
                if tk == &self
                {
-                  return s.to_string();
+                  return s.to_owned();
                }
             }
             unreachable!{};

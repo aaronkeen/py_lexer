@@ -25,25 +25,25 @@ impl LexerError
       match self
       {
          LexerError::BadLineContinuation =>
-            "bad line continuation".to_string(),
+            "bad line continuation".to_owned(),
          LexerError::UnterminatedTripleString =>
-            "unterminated triple-quoted string".to_string(),
-         LexerError::UnterminatedString => "unterminated string".to_string(),
+            "unterminated triple-quoted string".to_owned(),
+         LexerError::UnterminatedString => "unterminated string".to_owned(),
          LexerError::InvalidCharacter(c) => format!("invalid character {}", c),
-         LexerError::Dedent => "misaligned dedent".to_string(),
+         LexerError::Dedent => "misaligned dedent".to_owned(),
          LexerError::HexEscapeShort =>
-            "missing digits in hex escape".to_string(),
+            "missing digits in hex escape".to_owned(),
          LexerError::MalformedUnicodeEscape =>
-            "malformed unicode escape".to_string(),
+            "malformed unicode escape".to_owned(),
          LexerError::MalformedNamedUnicodeEscape =>
-            "malformed named unicode escape".to_string(),
+            "malformed named unicode escape".to_owned(),
          LexerError::UnknownUnicodeName(s) =>
             format!("unknown unicode name '{}'", s),
-         LexerError::MissingDigits => "missing digits".to_string(),
+         LexerError::MissingDigits => "missing digits".to_owned(),
          LexerError::MalformedFloat =>
-            "malformed floating point number".to_string(),
+            "malformed floating point number".to_owned(),
          LexerError::MalformedImaginary =>
-            "malformed imaginary number".to_string(),
+            "malformed imaginary number".to_owned(),
          LexerError::InvalidSymbol(c) => format!("invalid symbol '{}'", c),
          LexerError::Internal(s) => format!("internal error: {}", s),
       }
