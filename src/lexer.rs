@@ -176,8 +176,8 @@ pub struct InternalLexer<'a>
    dedent_count: i32,            // negative value to indicate a misalignment
    open_braces: u32,
    lines: Vec<Line<'a>>,
-   current_line: Option<Line<'a>>,
-   next_line: usize,
+   current_line: Option<&'a mut Line<'a>>,
+   next_line_idx: usize,
 }
 
 impl <'a> Iterator for InternalLexer<'a>
@@ -211,7 +211,7 @@ impl <'a> InternalLexer<'a>
          dedent_count: 0,
          lines: lines,
          current_line: None,
-         next_line: 0,
+         next_line_idx: 0,
          open_braces: 0,
       }
    }
@@ -225,8 +225,8 @@ impl <'a> InternalLexer<'a>
       result.0
    }
 
-   fn next_token_line(&mut self, current_line: Option<Line<'a>>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn next_token_line(&mut self, current_line: Option<&'a mut Line<'a>>)
+      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
    {
       if let Some(mut current_line) = current_line
       {
@@ -236,79 +236,61 @@ impl <'a> InternalLexer<'a>
          }
          else
          {
-            consume_space_to_next(&mut current_line);
-            match current_line.chars.peek()
+            consume_space_to_next(&mut current_line.line);
+            if LOGICAL_EOL_RE.is_match(current_line.line)
             {
-               Some(&'#') => self.process_end_of_line(current_line),
-               Some(&'u') | Some(&'U') =>
-               {
-                  if current_line.chars.peek_at(1).map_or(false,
-                     |&c| c == '\'' || c == '"')
-                  {
-                     self.process_string(current_line)
-                  }
-                  else
-                  {
-                     process_identifier(current_line)
-                  }
-               },
-               Some(&'r') | Some(&'R') =>
-               {
-                  if current_line.chars.peek_at(1).map_or(false,
-                     |&c| c == '\'' || c == '"')
-                  {
-                     self.process_string(current_line)
-                  }
-                  else if current_line.chars.peek_at(1).map_or(false,
-                        |&c| c == 'b' || c == 'B') &&
-                     current_line.chars.peek_at(2).map_or(false,
-                        |&c| c == '\'' || c == '"')
-                  {
-                     self.process_byte_string(current_line)
-                  }
-                  else
-                  {
-                     process_identifier(current_line)
-                  }
-               },
-               Some(&'b') | Some(&'B') =>
-               {
-                  if current_line.chars.peek_at(1).map_or(false,
-                     |&c| c == '\'' || c == '"') ||
-                     (current_line.chars.peek_at(1).map_or(false,
-                        |&c| c == 'r' || c == 'R') &&
-                        current_line.chars.peek_at(2).map_or(false,
-                           |&c| c == '\'' || c == '"'))
-                  {
-                     self.process_byte_string(current_line)
-                  }
-                  else
-                  {
-                     process_identifier(current_line)
-                  }
-               },
-               Some(&c) if is_xid_start(c) =>
-                  process_identifier(current_line),
-               Some(&c) if c.is_digit(10) => process_number(current_line),
-               Some(&'.') =>
-               {
-                  match current_line.chars.peek_at(1)
-                  {
-                     Some(&c) if c.is_digit(10) => 
-                        process_number(current_line),
-                     _ => self.process_symbols(current_line),
-                  }
-               }
-               Some(&'\\') => self.process_line_join(current_line),
-               Some(&'\'') | Some(&'"') => self.process_string(current_line),
-               Some(_) => self.process_symbols(current_line),
-               None => self.process_end_of_line(current_line),
+               self.process_end_of_line(current_line)
+            }
+            else if STRING_START_RE.is_match(current_line.line)
+            {
+               self.process_string(current_line)
+            }
+            else if BYTES_START_RE.is_match(current_line.line)
+            {
+               self.process_byte_string(current_line)
+            }
+            else if let Some((_, end)) = ID_START_RE.find(current_line.line)
+            {
+               process_identifier(current_line, end)
+            }
+            else if let Some((_, end)) = FLOAT_START_RE.find(current_line.line)
+            {
+               process_float(current_line, end)
+            }
+            else if let Some((_, end)) =
+               INT_IMG_START_RE.find(current_line.line)
+            {
+               process_number(current_line, end, |s| Token::Imaginary(s))
+            }
+            else if let Some((_, end)) = DEC_START_RE.find(current_line.line)
+            {
+               process_number(current_line, end, |s| Token::DecInteger(s))
+            }
+            else if let Some((_, end)) = HEX_START_RE.find(current_line.line)
+            {
+               process_number(current_line, end, |s| Token::HexInteger(s))
+            }
+            else if let Some((_, end)) = OCT_START_RE.find(current_line.line)
+            {
+               process_number(current_line, end, |s| Token::OctInteger(s))
+            }
+            else if let Some((_, end)) = BIN_START_RE.find(current_line.line)
+            {
+               process_number(current_line, end, |s| Token::BinInteger(s))
+            }
+            else if LINE_JOIN_START_RE.is_match(current_line.line)
+            {
+               self.process_line_join(current_line)
+            }
+            else
+            {
+               self.process_symbols(current_line)
             }
          }
       }
       else
       {
-         match self.lines.next()
+         match self.next_line()
          {
             None if self.indent_stack.len() <= 1 => (None, None),
             None =>
@@ -316,7 +298,7 @@ impl <'a> InternalLexer<'a>
                self.indent_stack.pop();
                (Some((0, Ok(Token::Dedent))), None)
             },
-            Some(newline) => self.process_line_start(newline)
+            Some(newline) => self.process_line_start(newline),
          }
       }
    }
@@ -788,13 +770,12 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_line_start(&mut self, mut newline: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn process_line_start(&mut self, newline: &mut Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<&mut Line<'a>>)
    {
       if let Some(&previous_indent) = self.indent_stack.last()
       {
-         if newline.chars.peek().is_none() ||                  // blank line
-            newline.chars.peek().map_or(false, |&c| c == '#')  // only comment
+         if LOGICAL_EOL_RE.find(newline.line).is_some()
          {
             self.next_token_line(None)
          }
@@ -830,8 +811,8 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_dedents(&mut self, current_line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn process_dedents(&mut self, current_line: &'a mut Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
    {
       if self.dedent_count == -1
       {
@@ -979,8 +960,8 @@ impl <'a> InternalLexer<'a>
       (line.number, Ok(result))
    }
 
-   fn process_end_of_line(&mut self, line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn process_end_of_line(&mut self, line: &'a mut Line<'a>)
+      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
    {
       if self.open_braces == 0
       {
@@ -988,131 +969,63 @@ impl <'a> InternalLexer<'a>
       }
       else
       {
-         let newline = self.lines.next();
+         let newline = self.next_line();
          self.next_token_line(newline)
+      }
+   }
+
+   fn next_line(&mut self)
+      -> Option<&'a mut Line<'a>>
+   {
+      if self.next_line_idx < self.lines.len()
+      {
+         let newline = &mut self.lines[self.next_line_idx];
+         self.next_line_idx += 1;
+         Some(newline)
+      }
+      else
+      {
+         None
       }
    }
 }
 
-fn process_identifier(mut current_line: Line)
+fn process_identifier(mut current_line: Line, end: usize)
    -> (Option<(usize, ResultToken)>, Option<Line>)
 {
-   let result = build_identifier(&mut current_line);
-   (Some(result), Some(current_line))
+   let token = keyword_lookup(current_line.line[0..end].to_owned());
+   current_line.line = &current_line.line[end..];
+   (Some((current_line.number, Ok(token))), Some(current_line))
 }
 
-fn build_identifier(line: &mut Line)
-   -> (usize, ResultToken)
-{
-   let token = keyword_lookup(
-      consume_and_while(String::new(), line, |c| is_xid_continue(c)));
-   (line.number, Ok(token))
-}
-
-fn process_number(mut current_line: Line)
+fn process_float(mut current_line: Line, end: usize)
    -> (Option<(usize, ResultToken)>, Option<Line>)
 {
-   let result = build_number(&mut current_line);
-   (Some(result), Some(current_line))
-}
-
-fn build_number(line: &mut Line)
-   -> (usize, ResultToken)
-{
-   match line.chars.peek()
+   let rest = &current_line.line[end..];
+   if let Some((_, end_img)) = IMG_SUFFIX_START_RE.is_match(rest)
    {
-      Some(&'0') =>
-      {
-         let result = build_zero_prefixed_number(line);
-         (line.number, result)
-      },
-      Some(&'.') =>
-      {
-         let result = build_dot_prefixed(line);
-         (line.number, result)
-      },
-      _ =>
-      {
-         let result = build_decimal_number(line);
-         let result = build_float_part(result, line);
-
-         (line.number, result)
-      },
+      current_line.line = &current_line.line[(end + end_img)..];
+      let token_str = current_line.line[0..(end + end_img)].to_owned();
+      (Some((current_line.number, Ok(Token::Imaginary(token_str)))),
+         Some(current_line))
+   }
+   else
+   {
+      current_line.line = rest;
+      let token_str = current_line.line[0..end].to_owned();
+      (Some((current_line.number, Ok(Token::Float(token_str)))),
+         Some(current_line))
    }
 }
 
-fn build_dot_prefixed(line: &mut Line)
-   -> ResultToken
+fn process_number<F>(mut current_line: Line, end: usize, ctor: F)
+   -> (Option<(usize, ResultToken)>, Option<Line>)
+   where F : Fn(String) -> Token
 {
-   let mut token_str = String::new();
-   token_str.push(line.chars.next().unwrap());
-
-   match line.chars.peek()
-   {
-      Some(&c) if c.is_digit(10) =>
-      {
-         let result = require_radix_digits(token_str, line, 10,
-            |s| Token::Float(s));
-         let result = build_exp_float(result, line);
-         let result = build_img_float(result, line);
-         result
-      },
-      _ => Err(LexerError::Internal("dot".to_owned()))
-   }
-}
-
-fn build_decimal_number(line: &mut Line)
-   -> ResultToken
-{
-   require_radix_digits(String::new(), line, 10, |s| Token::DecInteger(s))
-}
-
-fn build_zero_prefixed_number(line: &mut Line)
-   -> ResultToken
-{
-   let mut token_str = String::new();
-   token_str.push(line.chars.next().unwrap());
-
-   match line.chars.peek()
-   {
-      Some(&'o') | Some(&'O') =>
-      {
-         token_str.push(line.chars.next().unwrap());
-         require_radix_digits(token_str, line, 8, |s| Token::OctInteger(s))
-      },
-      Some(&'x') | Some(&'X') =>
-      {
-         token_str.push(line.chars.next().unwrap());
-         require_radix_digits(token_str, line, 16, |s| Token::HexInteger(s))
-      },
-      Some(&'b') | Some(&'B') =>
-      {
-         token_str.push(line.chars.next().unwrap());
-         require_radix_digits(token_str, line, 2, |s| Token::BinInteger(s))
-      },
-      Some(&'0') => 
-      {
-         token_str = consume_and_while(token_str, line,
-            |c| c.is_digit(1));
-         if line.chars.peek().map_or(false, |c| c.is_digit(10))
-         {
-            let token = require_radix_digits(token_str, line, 10,
-               |s| Token::DecInteger(s));
-            require_float_part(token, line)
-         }
-         else
-         {
-            build_float_part(Ok(Token::DecInteger(token_str)), line)
-         }
-      },
-      Some(&c) if c.is_digit(10) =>
-      {
-         let token = require_radix_digits(token_str, line, 10,
-               |s| Token::DecInteger(s));
-         require_float_part(token, line)
-      },
-      _ => build_float_part(Ok(Token::DecInteger(token_str)), line),
-   }
+   let token_str = current_line.line[0..end].to_owned();
+   current_line.line = &current_line.line[end..];
+   (Some((current_line.number, Ok(ctor(token_str)))), 
+      Some(current_line))
 }
 
 fn push_octal_character(mut line: Line, mut token_str: String, c: char)
@@ -1258,142 +1171,6 @@ fn build_n_while<P>(line: &mut Line, n: u32, predicate: P)
    if i == n { Some(s) } else { None }
 }
 
-fn require_radix_digits<F>(token_str: String, line: &mut Line,
-   radix: u32, token_type: F)
-   -> ResultToken
-      where F: Fn(String) -> Token
-{
-   match line.chars.peek()
-   {
-      Some(&c) if c.is_digit(radix) =>
-         Ok(token_type(consume_and_while(token_str, line,
-            |c| c.is_digit(radix)))),
-      _ => Err(LexerError::MissingDigits)
-   }
-}
-
-fn build_float_part(token: ResultToken, line: &mut Line)
-   -> ResultToken
-{
-   let result = build_point_float(token, line);
-   let result = build_exp_float(result, line);
-   let result = build_img_float(result, line);
-   result
-}
-
-fn require_float_part(token: ResultToken, line: &mut Line)
-   -> ResultToken
-{
-   let float_part;
-
-   {
-      let first = line.chars.peek();
-      float_part = first.map_or(false,
-         |&c| c == '.' || c == 'e' || c == 'E' || c == 'j' || c == 'J'
-         );
-   }
-
-   if !float_part
-   {
-      Err(LexerError::MalformedFloat)
-   }
-   else
-   {
-      build_float_part(token, line)
-   }
-}
-
-fn build_point_float(token: ResultToken, line: &mut Line)
-   -> ResultToken
-{
-   if token.is_err()
-   {
-      return token;
-   }
-
-   if line.chars.peek().map_or(true, |&c| c != '.')
-   {
-      return token;
-   }
-
-   match token
-   {
-      Ok(ref t) if t.is_decimal_integer() => (),
-      _ => return Err(LexerError::MalformedFloat)
-   }
-
-   let mut token_str = token.unwrap().lexeme();
-
-   token_str.push(line.chars.next().unwrap());
-
-   if line.chars.peek().map_or(false, |c| c.is_digit(10))
-   {
-      require_radix_digits(token_str, line, 10, |s| Token::Float(s))
-   }
-   else
-   {
-      Ok(Token::Float(token_str))
-   }
-}
-
-fn build_exp_float(token: ResultToken, line: &mut Line)
-   -> ResultToken
-{
-   if token.is_err()
-   {
-      return token;
-   }
-
-   if line.chars.peek().map_or(true, |&c| c != 'e' && c != 'E')
-   {
-      return token;
-   }
-
-   match token
-   {
-      Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-      _ => return Err(LexerError::MalformedFloat)
-   }
-
-   let mut token_str = token.unwrap().lexeme();
-
-   token_str.push(line.chars.next().unwrap()); // consume the e|E
-
-   // plus or minus here
-   if line.chars.peek().map_or(false, |&c| c == '+' || c == '-')
-   {
-      token_str.push(line.chars.next().unwrap()); // consume the +|-
-   }
-
-   require_radix_digits(token_str, line, 10, |s| Token::Float(s))
-}
-
-fn build_img_float(token: ResultToken, line: &mut Line)
-   -> ResultToken
-{
-   if token.is_err()
-   {
-      return token;
-   }
-
-   if line.chars.peek().map_or(true, |&c| c != 'j' && c != 'J')
-   {
-      return token;
-   }
-
-   match token
-   {
-      Ok(ref t) if t.is_decimal_integer() || t.is_float() => (),
-      _ => return Err(LexerError::MalformedImaginary)
-   }
-
-   let mut token_str = token.unwrap().lexeme();
-
-   token_str.push(line.chars.next().unwrap()); // consume the j|J
-
-   Ok(Token::Imaginary(token_str))
-}
-
 fn match_one(line: &mut Line, tk: Token)
    -> Token
 {
@@ -1425,26 +1202,13 @@ fn match_pair_eq_opt(line: &mut Line, initial_token: Token,
    match_pair_opt(token, line, '=', weq)
 }
 
-fn consume_space_to_next(current_line: &mut Line)
+fn consume_space_to_next(text: &mut &str)
 {
-   while current_line.chars.peek().map_or(false, |&c| is_space(c))
+   match SPACE_START_RE.find(text)
    {
-      current_line.chars.next();
+      None => (),
+      Some(start, end) => *text = &text[end..],
    }
-}
-
-fn consume_and_while<P>(mut token_str: String, line: &mut Line, predicate: P)
-   -> String
-      where P: Fn(char) -> bool
-{
-   token_str.push(line.chars.next().unwrap());
-
-   while line.chars.peek().map_or(false, |&c| predicate(c))
-   {
-      token_str.push(line.chars.next().unwrap());
-   }
-
-   token_str
 }
 
 fn determine_spaces(char_count: u32, tab_stop_size: u32)
@@ -1496,22 +1260,6 @@ fn count_indentation<'a>(line: &mut &'a str)
    (count, leading_spaces)
 }
 
-/// This function should be modified to do a more appropriate unicode
-/// check.  Eliding for now due to apparently unstable support in Rust.
-fn is_xid_start(c: char)
-   -> bool
-{
-   c.is_alphabetic() || c == '_'
-}
-
-/// This function should be modified to do a more appropriate unicode
-/// check.  Eliding for now due to apparently unstable support in Rust.
-fn is_xid_continue(c: char)
-   -> bool
-{
-   c.is_alphanumeric() || c == '_'
-}
-
 /*
    -----------------------------------------------------------------
    --------------------- REGULAR EXPRESSIONS -----------------------
@@ -1521,8 +1269,40 @@ fn is_xid_continue(c: char)
 lazy_static!
 {
    static ref LINE_SPLIT_RE : Regex = Regex::new(r"\n|\r\n|\r|$").unwrap();
+   static ref LOGICAL_EOL_RE : Regex = Regex::new(r"^$ | ^#").unwrap();
+   static ref SPACE_START_RE : Regex = Regex::new(r"^[:space:]").unwrap();
+   static ref LINE_JOIN_START_RE : Regex = Regex::new(r"^\").unwrap();
+   static ref STRING_START_RE : Regex =
+      Regex::new(r#"^['"]|^[uU]['"]|^[rR]['"]"#).unwrap();
+   static ref BYTES_START_RE : Regex =
+      Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
+   static ref ID_START_RE : Regex =
+      Regex::new(r"(?x)^
+         [\p{Lu}\p{Ll}\p{Lt}\p{Lm}\p{Lo}\p{Nl}     # letters
+            _
+            \x{2118}\x{212E}\x{309B}\x{309C}       # Other_ID_Start
+         ]
+         [\p{Lu}\p{Ll}\p{Lt}\p{Lm}\p{Lo}\p{Nl}     # letters
+            _
+            \x{2118}\x{212E}\x{309B}\x{309C}       # Other_ID_Start
+            \p{Mn}\p{Mc}\p{Nd}\p{Pc}               # Number and Connectors
+            \x{00B7}\x{0387}\x{1369}-\x{1371}\x{19DA} # Other_ID_Continue
+         ]*").unwrap();
+   static ref BIN_START_RE : Regex = Regex::new(r"^0[bB][01]+").unwrap();
+   static ref OCT_START_RE : Regex = Regex::new(r"^0[oO][0-7]+").unwrap();
+   static ref HEX_START_RE : Regex = Regex::new(r"^0[xX][:xdigit:]+").unwrap();
+   static ref DEC_START_RE : Regex = Regex::new(r"^0+|^[1-9]\d*").unwrap();
+   static ref INT_IMG_START_RE : Regex = Regex::new(r"^\d+[jJ]").unwrap();
+   static ref IMG_SUFFIX_START_RE : Regex = Regex::new(r"^[jJ]").unwrap();
+   static ref FLOAT_START_RE : Regex =
+      Regex::new(r"(?x)
+         ^\d+[eE][\+-]\d+     # dddddE+ddd
+         | ^(?:
+            \.\d+             # .ddddd
+            | \d+\.(?:\d+)?   # dddddd. or ddddddd.ddddd
+            )([eE][\+-]\d+)?  # optionally E+ddddd
+      ").unwrap();
 }
-
 
 /*
    -----------------------------------------------------------------
