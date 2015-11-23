@@ -1,8 +1,8 @@
 /// It should be noted that indentation checks do not verify that mixed
 /// spaces and tabs do not depend on the size of a tab stop for correctness.
 
-extern crate unicode_names;
-
+use unicode_names;
+use regex::Regex;
 use std::ascii::AsciiExt;
 use std::char;
 use std::cmp;
@@ -24,14 +24,13 @@ pub struct Lexer<'a>
 
 impl <'a> Lexer<'a>
 {
-   pub fn new<'b, I>(lines: I)
-      -> Lexer<'b>
-      where I: Iterator<Item=&'b str> + 'b
+   pub fn new(input: &str)
+      -> Lexer
    {
       Lexer{lexer:
          StringJoiningLexer::new(
             BytesJoiningLexer::new(
-               InternalLexer::new(lines)
+               InternalLexer::new(input)
             )
          ).peekable()}
    }
@@ -156,18 +155,18 @@ struct Line<'a>
 {
    number: usize,
    indentation: u32,
-   leading_spaces: String,
-   chars: MultiPeekable<Chars<'a>>
+   leading_spaces: &'a str,
+   line: &'a str,
 }
 
 impl <'a> Line<'a>
 {
-   fn new<'b>(number: usize, indentation: u32, leading_spaces: String,
-      chars: MultiPeekable<Chars<'b>>)
+   fn new<'b>(number: usize, indentation: u32, leading_spaces: &'b str,
+      line: &'b str)
       -> Line<'b>
    {
       Line {number: number, indentation: indentation,
-         leading_spaces: leading_spaces, chars: chars}
+         leading_spaces: leading_spaces, line: line}
    }
 }
 
@@ -176,8 +175,9 @@ pub struct InternalLexer<'a>
    indent_stack: Vec<u32>,
    dedent_count: i32,            // negative value to indicate a misalignment
    open_braces: u32,
-   lines: Box<Iterator<Item=Line<'a>> + 'a>,
+   lines: Vec<Line<'a>>,
    current_line: Option<Line<'a>>,
+   next_line: usize,
 }
 
 impl <'a> Iterator for InternalLexer<'a>
@@ -193,22 +193,25 @@ impl <'a> Iterator for InternalLexer<'a>
 
 impl <'a> InternalLexer<'a>
 {
-   pub fn new<'b, I>(lines: I)
-      -> InternalLexer<'b>
-      where I: Iterator<Item=&'b str> + 'b
+   pub fn new(input: &str)
+      -> InternalLexer
    {
-      let iter = (1..).zip(lines)
-         .map(|(n, line)| (n, MultiPeekable::new(line.chars())))
-         .map(|(n, mut chars)|
+      let mut current = 0;
+      let lines = (1..).zip(LINE_SPLIT_RE.find_iter(input))
+         .scan(0, |current, (n, (start, end))|
             {
-               let (indentation, spaces) = count_indentation(&mut chars);
-               Line::new(n, indentation, spaces, chars)
-            });
+               let mut line = &input[*current..start];
+               *current = end;
+               let (indentation, spaces) = count_indentation(&mut line);
+               Some(Line::new(n, indentation, spaces, line))
+            })
+         .collect();
       ;
       InternalLexer{indent_stack: vec![0],
          dedent_count: 0,
-         lines: Box::new(iter),
+         lines: lines,
          current_line: None,
+         next_line: 0,
          open_braces: 0,
       }
    }
@@ -1450,12 +1453,10 @@ fn determine_spaces(char_count: u32, tab_stop_size: u32)
    tab_stop_size - char_count % tab_stop_size
 }
 
-/// This function currently considers \r as a whitespace character instead
-/// of an old Mac end of line character.
 fn is_space(c: char)
    -> bool
 {
-   c == ' ' || c == '\t' || c == '\x0C' || c == '\r' // ignore \r for now
+   c == ' ' || c == '\t' || c == '\x0C'
 }
 
 fn process_character(count: u32, c: char)
@@ -1471,18 +1472,18 @@ fn process_character(count: u32, c: char)
    }
 }
 
-fn count_indentation(chars: &mut MultiPeekable<Chars>)
-   -> (u32, String)
+fn count_indentation<'a>(line: &mut &'a str)
+   -> (u32, &'a str)
 {
    let mut count = 0;
-   let mut spaces = String::new();
+   let mut spaces = 0;
 
-   while let Some(&c) = chars.peek()
+   for c in line.chars()
    {
       if is_space(c)
       {
          count = process_character(count, c);
-         spaces.push(chars.next().unwrap());
+         spaces += 1;
       }
       else
       {
@@ -1490,7 +1491,9 @@ fn count_indentation(chars: &mut MultiPeekable<Chars>)
       }
    }
 
-   (count, spaces)
+   let leading_spaces = &line[0..spaces];
+   *line = &line[spaces..];
+   (count, leading_spaces)
 }
 
 /// This function should be modified to do a more appropriate unicode
@@ -1509,6 +1512,16 @@ fn is_xid_continue(c: char)
    c.is_alphanumeric() || c == '_'
 }
 
+/*
+   -----------------------------------------------------------------
+   --------------------- REGULAR EXPRESSIONS -----------------------
+   -----------------------------------------------------------------
+*/
+
+lazy_static!
+{
+   static ref LINE_SPLIT_RE : Regex = Regex::new(r"\n|\r\n|\r|$").unwrap();
+}
 
 
 /*
@@ -1528,7 +1541,7 @@ mod tests
    fn test_identifiers()
    {
       let chars = "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("_xyz".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
@@ -1560,7 +1573,7 @@ mod tests
    fn test_numbers()
    {
       let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . 3..2\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("123".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("456".to_owned())))));
@@ -1602,7 +1615,7 @@ mod tests
    fn test_dedent()
    {
       let chars = "    abf xyz\n\n\n\n        e2f\n             n12\n  n2\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("xyz".to_owned())))));
@@ -1624,7 +1637,7 @@ mod tests
    fn test_symbols()
    {
       let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Lbrace))));
@@ -1682,7 +1695,7 @@ mod tests
    fn test_keywords()
    {
       let chars = "false False None True and as assert async await break class continue def del defdel elif else except finally for from \nglobal if import in is lambda nonlocal not or pass raise return try while with yield\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("false".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::False))));
       assert_eq!(l.next(), Some((1, Ok(Token::None))));
@@ -1730,7 +1743,7 @@ mod tests
    fn test_strings_1()
    {
       let chars = "'abc 123 \txyz@\")#*)@'\n\"wfe wf w fwe'fwefw\"\n\"abc\n'last line'\n'just\\\n   kidding   \\\n \t kids'\n'xy\\\n  zq\nxyz'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc 123 \txyz@\")#*)@".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("wfe wf w fwe'fwefw".to_owned())))));
@@ -1748,7 +1761,7 @@ mod tests
    fn test_strings_2()
    {
       let chars = "'abc' \"def\" \\\n'123'\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef123".to_owned())))));
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
    }
@@ -1757,7 +1770,7 @@ mod tests
    fn test_strings_3()
    {
       let chars = "''' abc ' '' '''\n\"\"\"xyz\"\"\"\n'''abc\n \tdef\n123'''\n'''abc\\\n \tdef\\\n123'''\n'''abc\ndef";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String(" abc ' '' ".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("xyz".to_owned())))));
@@ -1773,7 +1786,7 @@ mod tests
    fn test_strings_4()
    {
       let chars = "'\\\\'\n'\\''\n'\\\"'\n'\\a'\n'\\b'\n'\\f'\n'\\n'\n'\\r'\n'\\t'\n'\\v'\n'\\m'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("'".to_owned())))));
@@ -1801,7 +1814,7 @@ mod tests
    fn test_strings_5()
    {
       let chars = "'\\007'\n'\\7'\n'\\175'\n'\\x07'\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\x07".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("\x07".to_owned())))));
@@ -1816,7 +1829,7 @@ mod tests
    fn test_strings_6()
    {
       let chars = "'\\x'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
    }
 
@@ -1824,7 +1837,7 @@ mod tests
    fn test_strings_7()
    {
       let chars = "'\\x7'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
    }
 
@@ -1832,7 +1845,7 @@ mod tests
    fn test_strings_8()
    {
       let chars = "'\\N{monkey}'\n'\\N{BLACK STAR}'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("🐒".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("★".to_owned())))));
@@ -1842,7 +1855,7 @@ mod tests
    fn test_strings_9()
    {
       let chars = "'\\N{monkey'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
    }
 
@@ -1850,7 +1863,7 @@ mod tests
    fn test_strings_10()
    {
       let chars = "'\\Nmonkey'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
    }
 
@@ -1858,7 +1871,7 @@ mod tests
    fn test_strings_11()
    {
       let chars = "'\\N{fhefaefi}'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::UnknownUnicodeName("fhefaefi".to_owned())))));
    }
 
@@ -1866,7 +1879,7 @@ mod tests
    fn test_strings_12()
    {
       let chars = "'\\u262f'\n'\\U00002D5E'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("☯".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((2, Ok(Token::String("ⵞ".to_owned())))));
@@ -1876,7 +1889,7 @@ mod tests
    fn test_strings_13()
    {
       let chars = "'\\u262'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedUnicodeEscape))));
    }
 
@@ -1884,7 +1897,7 @@ mod tests
    fn test_strings_14()
    {
       let chars = "'\\U00002D'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedUnicodeEscape))));
    }
 
@@ -1892,7 +1905,7 @@ mod tests
    fn test_strings_15()
    {
       let chars = "'\\u262f262f'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("☯262f".to_owned())))));
    }
 
@@ -1900,7 +1913,7 @@ mod tests
    fn test_strings_16()
    {
       let chars = "unlikely u'abc' u '123' U\"\"\"def\"\"\" u\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("unlikely".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("u".to_owned())))));
@@ -1913,7 +1926,7 @@ mod tests
    fn test_strings_17()
    {
       let chars = "r'\\txyz \\\n \\'fefe \\N{monkey}'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}".to_owned())))));
    }
 
@@ -1921,7 +1934,7 @@ mod tests
    fn test_strings_18()
    {
       let chars = "r'''\\txyz \\\n \\'fefe \\N{monkey}''''hello\\040\\700\\300'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello ǀÀ".to_owned())))));
    }
 
@@ -1929,7 +1942,7 @@ mod tests
    fn test_strings_19()
    {
       let chars = "'''hello\\\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((2, Err(LexerError::UnterminatedTripleString))));
    }
 
@@ -1937,7 +1950,7 @@ mod tests
    fn test_byte_strings_1()
    {
       let chars = "b'''hello'''";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![104, 101, 108, 108, 111])))));
    }
 
@@ -1945,7 +1958,7 @@ mod tests
    fn test_byte_strings_2()
    {
       let chars = "b'''hello\nblah'''";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![104, 101, 108, 108, 111, 10, 98, 108, 97, 104])))));
    }
 
@@ -1953,7 +1966,7 @@ mod tests
    fn test_byte_strings_3()
    {
       let chars = "b'\\x26\\040'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![38, 32])))));
    }
 
@@ -1961,7 +1974,7 @@ mod tests
    fn test_byte_strings_4()
    {
       let chars = "b'\\x26\\040\\700\\300'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![38, 32, 192, 192])))));
    }
 
@@ -1969,7 +1982,7 @@ mod tests
    fn test_byte_strings_5()
    {
       let chars = "b'abc\\\n  \t 123'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 32, 32, 9, 32, 49, 50, 51])))));
    }
 
@@ -1977,7 +1990,7 @@ mod tests
    fn test_byte_strings_6()
    {
       let chars = "b'abc\\\n  \t 123' \\\n  b'123'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 32, 32, 9, 32, 49, 50, 51, 49, 50, 51])))));
    }
 
@@ -1985,7 +1998,7 @@ mod tests
    fn test_byte_strings_7()
    {
       let chars = "rb'abc\\' \\\n  \t 123'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
    }
 
@@ -1993,7 +2006,7 @@ mod tests
    fn test_byte_strings_8()
    {
       let chars = "Br'abc\\' \\\n  \t' bR' 123'";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
    }
 
@@ -2001,7 +2014,7 @@ mod tests
    fn test_implicit_1()
    {
       let chars = "(1 + \n      2 \n)";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Plus))));
@@ -2013,7 +2026,7 @@ mod tests
    fn test_implicit_2()
    {
       let chars = "   (1 + \n   (   2 \n + 9 \n ) * \n      2 \n )\n2";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
@@ -2035,7 +2048,7 @@ mod tests
    fn test_implicit_3()
    {
       let chars = "('abc' \n      'def' \n)";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::String("abcdef".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
@@ -2045,7 +2058,7 @@ mod tests
    fn test_implicit_4()
    {
       let chars = "def abc(a, g,\n         c):\n   first";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Def))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abc".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
@@ -2067,7 +2080,7 @@ mod tests
    fn test_implicit_5()
    {
       let chars = "('abc'\n   #  'def' \n)";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
       assert_eq!(l.next(), Some((3, Ok(Token::Rparen))));
@@ -2077,7 +2090,7 @@ mod tests
    fn test_implicit_6()
    {
       let chars = "'abc'\n   #  'def' \n123\n";
-      let mut l = Lexer::new(chars.lines());
+      let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("abc".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Ok(Token::DecInteger("123".to_owned())))));
