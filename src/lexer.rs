@@ -9,7 +9,7 @@ use std::cmp;
 use std::str::Chars;
 use std::iter::Peekable;
 use iter::MultiPeekable;
-use tokens::{Token, keyword_lookup};
+use tokens::{Token, keyword_lookup, symbol_lookup};
 use errors::LexerError;
 
 
@@ -266,7 +266,7 @@ impl <'a> InternalLexer<'a>
             }
             else
             {
-               self.process_symbols()
+               self.process_symbol()
             }
          }
       }
@@ -807,151 +807,36 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_symbols(&mut self)
+   fn process_symbol(&mut self)
       -> Option<(usize, ResultToken)>
    {
-      if let Some((_, end)) = SYM_DOT_RE.find(self.text)
+      if let Some((_, end)) = SYMBOLS_RE.find(self.text)
       {
+         let result = &self.text[..end];
          self.update_text(end);
-         Some((self.line_number, Ok(Token::Dot)))
+
+         match result
+         {
+            "(" | "[" | "{" =>
+            {
+               self.open_braces += 1;
+               Some((self.line_number, symbol_lookup(result)))
+            },
+            ")" | "]" | "}" =>
+            {
+               self.open_braces = cmp::max(0, self.open_braces - 1);
+               Some((self.line_number, symbol_lookup(result)))
+            },
+            sym => Some((self.line_number, symbol_lookup(sym)))
+         }
       }
       else
       {
-         unimplemented!();
+         let c = &self.text[..1];
+         self.update_text(1); // skip one to allow progress
+         Some((self.line_number, Err(LexerError::InvalidSymbol(c.to_owned()))))
       }
-/*
-      let result = self.build_symbol(&mut line);
-      (Some(result), Some(line))
-*/
    }
-
-/*
-   fn build_symbol(&mut self, line: &mut Line<'a>)
-      -> (usize, ResultToken)
-   {
-      let result =
-         match line.chars.peek()
-         {
-            Some(&'(') =>
-            {
-               self.open_braces += 1;
-               match_one(line, Token::Lparen)
-            },
-            Some(&')') =>
-            {
-               self.open_braces = cmp::max(0, self.open_braces - 1);
-               match_one(line, Token::Rparen)
-            },
-            Some(&'[') =>
-            {
-               self.open_braces += 1;
-               match_one(line, Token::Lbracket)
-            },
-            Some(&']') =>
-            {
-               self.open_braces = cmp::max(0, self.open_braces - 1);
-               match_one(line, Token::Rbracket)
-            },
-            Some(&'{') =>
-            {
-               self.open_braces += 1;
-               match_one(line, Token::Lbrace)
-            },
-            Some(&'}') =>
-            {
-               self.open_braces = cmp::max(0, self.open_braces - 1);
-               match_one(line, Token::Rbrace)
-            },
-            Some(&',') => match_one(line, Token::Comma),
-            Some(&':') => match_one(line, Token::Colon),
-            Some(&';') => match_one(line, Token::Semi),
-            Some(&'~') => match_one(line, Token::BitNot),
-            Some(&'=') => match_pair_opt(
-               match_one(line, Token::Assign), line, '=', Token::EQ),
-            Some(&'@') => match_pair_opt(
-               match_one(line, Token::At), line, '=', Token::AssignAt),
-            Some(&'%') => match_pair_opt(
-               match_one(line, Token::Mod), line, '=', Token::AssignMod),
-            Some(&'&') => match_pair_opt(
-               match_one(line, Token::BitAnd), line, '=', Token::AssignBitAnd),
-            Some(&'|') => match_pair_opt(
-               match_one(line, Token::BitOr), line, '=', Token::AssignBitOr),
-            Some(&'^') => match_pair_opt(
-               match_one(line, Token::BitXor), line, '=', Token::AssignBitXor),
-            Some(&'+') => match_pair_opt(
-               match_one(line, Token::Plus), line, '=', Token::AssignPlus),
-            Some(&'*') =>
-            {
-               let token = match_one(line, Token::Times);
-               match_pair_eq_opt(line, token, '*', Token::Exponent)
-            },
-            Some(&'/') =>
-            {
-               let token = match_one(line, Token::Divide);
-               match_pair_eq_opt(line, token, '/', Token::DivideFloor)
-            },
-            Some(&'<') =>
-            {
-               let token = match_one(line, Token::LT);
-               match_pair_eq_opt(line, token, '<', Token::Lshift)
-            },
-            Some(&'>') =>
-            {
-               let token = match_one(line, Token::GT);
-               match_pair_eq_opt(line, token, '>', Token::Rshift)
-            },
-            Some(&'-') =>
-            {
-               let token = match_one(line, Token::Minus);
-               let token = match_pair_opt(token, line, '=', Token::AssignMinus);
-               if token == Token::Minus
-               {
-                  match_pair_opt(token, line, '>', Token::Arrow)
-               }
-               else
-               {
-                  token
-               }
-            },
-            Some(&'!') =>
-            {
-               // consume character
-               line.chars.next();
-               match line.chars.peek()
-               {
-                  Some(&'=') => match_one(line, Token::NE),
-                  _ => return (line.number,
-                        Err(LexerError::InvalidSymbol('!'))),
-               }
-            }
-            Some(&'.') =>
-            {
-               // consume character
-               line.chars.next();
-               match line.chars.peek()
-               {
-                  Some(&'.') => match line.chars.peek_at(1)
-                  {
-                     Some(&'.') =>
-                     {
-                        line.chars.next();
-                        line.chars.next();
-                        Token::Ellipsis
-                     },
-                     _ => Token::Dot,
-                  },
-                  _ => Token::Dot, 
-               }
-            }
-            Some(&c) => return (line.number, Err(LexerError::InvalidSymbol(c))),
-            _ => return (line.number,
-               Err(LexerError::Internal(
-                  "error processing symbol".to_owned()))),
-         };
-
-      (line.number, Ok(result))
-   }
-*/
 
    fn process_end_of_line(&mut self, end: usize)
       -> Option<(usize, ResultToken)>
@@ -993,7 +878,7 @@ impl <'a> InternalLexer<'a>
    fn process_identifier(&mut self, end: usize)
       -> Option<(usize, ResultToken)>
    {
-      let token = keyword_lookup(self.text[0..end].to_owned());
+      let token = keyword_lookup(&self.text[0..end]);
       self.update_text(end);
       Some((self.line_number, Ok(token)))
    }
@@ -1304,7 +1189,23 @@ lazy_static!
             | \d+\.(?:\d+)?   # dddddd. or ddddddd.ddddd
             )([eE][\+-]?\d+)?  # optionally E+ddddd
       ").unwrap();
-   static ref SYM_DOT_RE : Regex = Regex::new(r"^\.").unwrap();
+   static ref SYMBOLS_RE : Regex = Regex::new(r"(?x)
+      ^(?:\.\.\.|\.
+         |\*\*=|\*\*|\*=|\*
+         |<<=|<<|<=|<
+         |>>=|>>|>=|>
+         |//=|//|/=|/
+         |\^=|\^
+         |\|=|\|
+         |&=|&
+         |@=|@
+         |%=|%
+         |-=|->|-
+         |\+=|\+
+         |==|=
+         |;|:|,|\{|\}|\[|\]|\(|\)|~|!=
+       )
+      ").unwrap();
 }
 
 /*
@@ -1398,7 +1299,6 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }   
 
-/*
    #[test]
    fn test_dedent()
    {
@@ -1424,7 +1324,7 @@ mod tests
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-*** ///%@<<>>&|^~<><=>===!=!...";
+      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-*** ///%@<<>>&|^~<><=>===!=!...$?`.";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
@@ -1475,8 +1375,12 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::GE))));
       assert_eq!(l.next(), Some((1, Ok(Token::EQ))));
       assert_eq!(l.next(), Some((1, Ok(Token::NE))));
-      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol('!')))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol("!".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Ellipsis))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol("$".to_owned())))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol("?".to_owned())))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::InvalidSymbol("`".to_owned())))));
+      assert_eq!(l.next(), Some((1, Ok(Token::Dot))));
    }
 
    #[test]
@@ -1527,6 +1431,7 @@ mod tests
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
    }
 
+/*
    #[test]
    fn test_strings_1()
    {
