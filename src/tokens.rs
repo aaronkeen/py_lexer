@@ -301,7 +301,7 @@ const LEXEMES : [(Token, &'static str); 84] =
       (Token::AssignTimes, "*="),
       (Token::AssignDivide, "/="),
       (Token::AssignDivideFloor, "//="),
-      (Token::AssignMod, "%"),
+      (Token::AssignMod, "%="),
       (Token::AssignAt, "@="),
       (Token::AssignBitAnd, "&="),
       (Token::AssignBitOr, "|="),
