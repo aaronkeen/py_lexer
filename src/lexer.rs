@@ -177,7 +177,6 @@ impl <'a> InternalLexer<'a>
    pub fn new(input: &str)
       -> InternalLexer
    {
-      let mut current = 0;
       InternalLexer{indent_stack: vec![0],
          dedent_count: 0,
          text: input,
@@ -212,11 +211,11 @@ impl <'a> InternalLexer<'a>
             {
                self.process_end_of_line(end)
             }
-/*
             else if STRING_START_RE.is_match(self.text)
             {
                self.process_string()
             }
+/*
             else if BYTES_START_RE.is_match(self.text)
             {
                self.process_byte_string()
@@ -293,6 +292,49 @@ impl <'a> InternalLexer<'a>
       }
    }
 
+   fn process_string(&mut self)
+      -> Option<(usize, ResultToken)>
+   {
+      let (_, end) = STRING_PREFIX_RE.find(self.text).unwrap();
+      let caps = STRING_PREFIX_RE.captures(self.text).unwrap();
+      let raw = caps.at(1).is_some();
+      let quote = caps.at(2).unwrap();
+
+      self.update_text(end);
+
+      let (re, fail, err) = match quote
+      {
+         "'" => (&*STRING_SINGLE_QUOTE_RE, &*STRING_FAIL_RE,
+                  LexerError::UnterminatedString),
+         "'''" => (&*STRING_TRIPLE_SINGLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
+                  LexerError::UnterminatedTripleString),
+         "\"" => (&*STRING_DOUBLE_QUOTE_RE, &*STRING_FAIL_RE,
+                  LexerError::UnterminatedString),
+         "\"\"\"" => (&*STRING_TRIPLE_DOUBLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
+                  LexerError::UnterminatedTripleString),
+         _ => unreachable!(),
+      };
+
+      let line_number = self.line_number;
+      let (end, new_lines, result) = match re.find(self.text)
+      {
+         Some((_, end)) =>
+         {
+            let caps = re.captures(self.text).unwrap();
+            let contents = caps.at(1).unwrap_or("").to_owned();
+            (end, NEWLINE_RE.find_iter(&contents).count(),
+               Ok(Token::String(contents)))
+         },
+         None =>
+         {
+            let (_, end) = fail.find(self.text).unwrap();
+            (end, NEWLINE_RE.find_iter(&self.text[..end]).count(), Err(err))
+         },
+      };
+      self.update_text(end);
+      self.line_number += new_lines;
+      Some((line_number, result))
+   }
 /*
    fn process_string(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
@@ -1093,7 +1135,7 @@ fn consume_space_to_next(text: &mut &str)
    match SPACE_RE.find(text)
    {
       None => (),
-      Some((start, end)) => *text = &text[end..],
+      Some((_, end)) => *text = &text[end..],
    }
 }
 
@@ -1157,10 +1199,6 @@ lazy_static!
    static ref SPACE_RE : Regex = Regex::new(r"^[ \t\f]*").unwrap();
    static ref LINE_JOIN_START_RE : Regex = Regex::new(r"^\\").unwrap();
    static ref LINE_JOIN_RE : Regex = Regex::new(r"^\\(?:\r\n|\r|\n)").unwrap();
-   static ref STRING_START_RE : Regex =
-      Regex::new(r#"^['"]|^[uU]['"]|^[rR]['"]"#).unwrap();
-   static ref BYTES_START_RE : Regex =
-      Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
    static ref ID_RE : Regex =
       Regex::new(r"(?x)^
          [\p{Lu}\p{Ll}\p{Lt}\p{Lm}\p{Lo}\p{Nl}     # letters
@@ -1206,6 +1244,25 @@ lazy_static!
          |;|:|,|\{|\}|\[|\]|\(|\)|~|!=
        )
       ").unwrap();
+   static ref STRING_START_RE : Regex =
+      Regex::new(r#"^(?:[uU]|[rR])?['"]"#).unwrap();
+   static ref BYTES_START_RE : Regex =
+      Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
+   static ref STRING_PREFIX_RE : Regex =
+      Regex::new(r#"^(?:[uU]|([rR]))?('''|'|"""|")"#).unwrap();
+   static ref STRING_SINGLE_QUOTE_RE : Regex =
+      Regex::new(r#"^(?s)((?:\\\r\n|\\.|[^\\\r\n'])*)'"#).unwrap();
+   static ref STRING_DOUBLE_QUOTE_RE : Regex =
+      Regex::new(r#"^(?s)((?:\\\r\n|\\.|[^\\\r\n"])*)""#).unwrap();
+   static ref STRING_TRIPLE_SINGLE_QUOTE_RE : Regex =
+      Regex::new(r#"^(?s)((?:[^\\]|\\.)*?)'''"#).unwrap();
+   static ref STRING_TRIPLE_DOUBLE_QUOTE_RE : Regex =
+      Regex::new(r#"^(?s)((?:[^\\]|\\.)*?)""""#).unwrap();
+   static ref STRING_FAIL_RE : Regex =
+      Regex::new(r#"^(?s)((?:[^\\\r\n]|\\.|\\\r\n)*)"#).unwrap();
+   static ref STRING_TRIPLE_FAIL_RE : Regex =
+      Regex::new(r#"^(?s)((?:[^\\]|\\.|\\\r\n)*?)$"#).unwrap();
+   static ref NEWLINE_RE : Regex = Regex::new(r"\r\n|\r|\n").unwrap();
 }
 
 /*
@@ -1324,7 +1381,7 @@ mod tests
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-*** ///%@<<>>&|^~<><=>===!=!...$?`.";
+      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...$?`.";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
@@ -1431,7 +1488,6 @@ mod tests
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
    }
 
-/*
    #[test]
    fn test_strings_1()
    {
@@ -1450,6 +1506,7 @@ mod tests
       assert_eq!(l.next(), Some((9, Err(LexerError::UnterminatedString))));
    }
 
+/*
    #[test]
    fn test_strings_2()
    {
