@@ -151,33 +151,14 @@ impl <'a> Iterator for BytesJoiningLexer<'a>
    }
 }
 
-struct Line<'a>
-{
-   number: usize,
-   indentation: u32,
-   leading_spaces: &'a str,
-   line: &'a str,
-}
-
-impl <'a> Line<'a>
-{
-   fn new<'b>(number: usize, indentation: u32, leading_spaces: &'b str,
-      line: &'b str)
-      -> Line<'b>
-   {
-      Line {number: number, indentation: indentation,
-         leading_spaces: leading_spaces, line: line}
-   }
-}
-
 pub struct InternalLexer<'a>
 {
    indent_stack: Vec<u32>,
    dedent_count: i32,            // negative value to indicate a misalignment
    open_braces: u32,
-   lines: Vec<Line<'a>>,
-   current_line: Option<&'a mut Line<'a>>,
-   next_line_idx: usize,
+   text: &'a str,
+   line_start: bool,
+   line_number: usize,
 }
 
 impl <'a> Iterator for InternalLexer<'a>
@@ -197,130 +178,115 @@ impl <'a> InternalLexer<'a>
       -> InternalLexer
    {
       let mut current = 0;
-      let lines = (1..).zip(LINE_SPLIT_RE.find_iter(input))
-         .scan(0, |current, (n, (start, end))|
-            {
-               let mut line = &input[*current..start];
-               *current = end;
-               let (indentation, spaces) = count_indentation(&mut line);
-               Some(Line::new(n, indentation, spaces, line))
-            })
-         .collect();
-      ;
       InternalLexer{indent_stack: vec![0],
          dedent_count: 0,
-         lines: lines,
-         current_line: None,
-         next_line_idx: 0,
+         text: input,
+         line_number: 1,
+         line_start: true,
          open_braces: 0,
       }
+   }
+
+   fn update_text(&mut self, end: usize)
+   {
+      self.text = &self.text[end..];
    }
 
    fn next_token(&mut self)
       -> Option<(usize, ResultToken)>
    {
-      let current_line = self.current_line.take();
-      let result = self.next_token_line(current_line);
-      self.current_line = result.1;
-      result.0
-   }
-
-   fn next_token_line(&mut self, current_line: Option<&'a mut Line<'a>>)
-      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
-   {
-      if let Some(mut current_line) = current_line
+      if self.text.len() > 0
       {
-         if self.dedent_count != 0
+         if self.line_start
          {
-            self.process_dedents(current_line)
+            self.process_line_start()
+         }
+         else if self.dedent_count != 0
+         {
+            self.process_dedents()
          }
          else
          {
-            consume_space_to_next(&mut current_line.line);
-            if LOGICAL_EOL_RE.is_match(current_line.line)
+            consume_space_to_next(&mut self.text);
+            if let Some((_, end)) = LOGICAL_EOL_RE.find(self.text)
             {
-               self.process_end_of_line(current_line)
+               self.process_end_of_line(end)
             }
-            else if STRING_START_RE.is_match(current_line.line)
+/*
+            else if STRING_START_RE.is_match(self.text)
             {
-               self.process_string(current_line)
+               self.process_string()
             }
-            else if BYTES_START_RE.is_match(current_line.line)
+            else if BYTES_START_RE.is_match(self.text)
             {
-               self.process_byte_string(current_line)
+               self.process_byte_string()
             }
-            else if let Some((_, end)) = ID_START_RE.find(current_line.line)
+*/
+            else if let Some((_, end)) = ID_START_RE.find(self.text)
             {
-               process_identifier(current_line, end)
+               self.process_identifier(end)
             }
-            else if let Some((_, end)) = FLOAT_START_RE.find(current_line.line)
+/*
+            else if let Some((_, end)) = FLOAT_START_RE.find(self.text)
             {
-               process_float(current_line, end)
+               self.process_float(end)
             }
-            else if let Some((_, end)) =
-               INT_IMG_START_RE.find(current_line.line)
+            else if let Some((_, end)) = INT_IMG_START_RE.find(self.text)
             {
-               process_number(current_line, end, |s| Token::Imaginary(s))
+               self.process_number(end, |s| Token::Imaginary(s))
             }
-            else if let Some((_, end)) = DEC_START_RE.find(current_line.line)
+            else if let Some((_, end)) = DEC_START_RE.find(self.text)
             {
-               process_number(current_line, end, |s| Token::DecInteger(s))
+               self.process_number(end, |s| Token::DecInteger(s))
             }
-            else if let Some((_, end)) = HEX_START_RE.find(current_line.line)
+            else if let Some((_, end)) = HEX_START_RE.find(self.text)
             {
-               process_number(current_line, end, |s| Token::HexInteger(s))
+               self.process_number(end, |s| Token::HexInteger(s))
             }
-            else if let Some((_, end)) = OCT_START_RE.find(current_line.line)
+            else if let Some((_, end)) = OCT_START_RE.find(self.text)
             {
-               process_number(current_line, end, |s| Token::OctInteger(s))
+               self.process_number(end, |s| Token::OctInteger(s))
             }
-            else if let Some((_, end)) = BIN_START_RE.find(current_line.line)
+            else if let Some((_, end)) = BIN_START_RE.find(self.text)
             {
-               process_number(current_line, end, |s| Token::BinInteger(s))
+               self.process_number(end, |s| Token::BinInteger(s))
             }
-            else if LINE_JOIN_START_RE.is_match(current_line.line)
+*/
+            else if let Some((_, end)) = LINE_JOIN_START_RE.find(self.text)
             {
-               self.process_line_join(current_line)
+               self.process_line_join(end)
             }
             else
             {
-               self.process_symbols(current_line)
+               // self.process_symbols()
+               unimplemented!();
             }
          }
       }
       else
       {
-         match self.next_line()
-         {
-            None if self.indent_stack.len() <= 1 => (None, None),
-            None =>
-            {
-               self.indent_stack.pop();
-               (Some((0, Ok(Token::Dedent))), None)
-            },
-            Some(newline) => self.process_line_start(newline),
-         }
+         None
       }
    }
 
-   fn process_line_join(&mut self, mut current_line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn process_line_join(&mut self, end: usize)
+      -> Option<(usize, ResultToken)>
    {
-      current_line.chars.next();
-      if current_line.chars.peek().is_none()
+      if let Some((_, end)) = LINE_JOIN_RE.find(self.text)
       {
          // explicit line join
-         let newline = self.lines.next();
-         self.next_token_line(newline)
+         self.line_number += 1;
+         self.update_text(end);
+         self.next_token()
       }
       else
       {
-         let line_number = current_line.number;
-         (Some((line_number, Err(LexerError::BadLineContinuation))),
-            Some(current_line))
+         self.update_text(end);
+         Some((self.line_number, Err(LexerError::BadLineContinuation)))
       }
    }
 
+/*
    fn process_string(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
@@ -769,40 +735,48 @@ impl <'a> InternalLexer<'a>
          Some(c) => (Some(line), Err(LexerError::InvalidCharacter(c))),
       }
    }
+*/
 
-   fn process_line_start(&mut self, newline: &mut Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<&mut Line<'a>>)
+   fn process_line_start(&mut self)
+      -> Option<(usize, ResultToken)>
    {
+      let indentation = count_indentation(&mut self.text);
+      self.line_start = false;  // next attempt processes line as normal
       if let Some(&previous_indent) = self.indent_stack.last()
       {
-         if LOGICAL_EOL_RE.find(newline.line).is_some()
+         if let Some((_, end)) = LOGICAL_EOL_RE.find(self.text)
          {
-            self.next_token_line(None)
+            // logically blank line, ignore entirely
+            self.update_text(end);
+            self.line_number += 1;
+            self.line_start = true;
+            self.next_token()
          }
-         else if newline.indentation > previous_indent
+         else if indentation > previous_indent
          {
-            self.indent_stack.push(newline.indentation);
-            (Some((newline.number, Ok(Token::Indent))), Some(newline))
+            self.indent_stack.push(indentation);
+            Some((self.line_number, Ok(Token::Indent)))
          }
-         else if newline.indentation < previous_indent
+         else if indentation < previous_indent
          {
             let stack_len = self.indent_stack.len();
             let mut i = stack_len - 1;
-            while newline.indentation < self.indent_stack[i]
+            while indentation < self.indent_stack[i]
             {
                i -= 1;
             }
             self.indent_stack.truncate(i + 1);
             self.dedent_count = (stack_len - 1 - i) as i32;
-            if self.indent_stack[i] != newline.indentation
+            if self.indent_stack[i] != indentation
             {
-               self.dedent_count *= -1;         // negate to flag error
+               self.dedent_count = -self.dedent_count; // negate to flag error
             }
-            self.next_token_line(Some(newline))
+            self.next_token()
          }
          else
          {
-            self.next_token_line(Some(newline))
+            // same indentation level, just get token
+            self.next_token()
          }
       }
       else
@@ -811,22 +785,22 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn process_dedents(&mut self, current_line: &'a mut Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
+   fn process_dedents(&mut self)
+      -> Option<(usize, ResultToken)>
    {
       if self.dedent_count == -1
       {
          self.dedent_count = 0;
-         (Some((current_line.number, Err(LexerError::Dedent))),
-            Some(current_line))
+         Some((self.line_number, Err(LexerError::Dedent)))
       }
       else
       {
          self.dedent_count += if self.dedent_count < 0 {1} else {-1};
-         (Some((current_line.number, Ok(Token::Dedent))), Some(current_line))
+         Some((self.line_number, Ok(Token::Dedent)))
       }
    }
 
+/*
    fn process_symbols(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
    {
@@ -959,21 +933,29 @@ impl <'a> InternalLexer<'a>
 
       (line.number, Ok(result))
    }
+*/
 
-   fn process_end_of_line(&mut self, line: &'a mut Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<&'a mut Line<'a>>)
+   fn process_end_of_line(&mut self, end: usize)
+      -> Option<(usize, ResultToken)>
    {
+      self.update_text(end);
+      let current_line_number = self.line_number;
+      self.line_number += 1;
       if self.open_braces == 0
       {
-         (Some((line.number, Ok(Token::Newline))), None)
+         self.line_start = true;
+         Some((current_line_number, Ok(Token::Newline)))
       }
       else
       {
-         let newline = self.next_line();
-         self.next_token_line(newline)
+         // implicit join, so the newline does not produce a token and
+         // the "start" of the next line should be ignored -- i.e., no
+         // indentation processing
+         self.next_token()
       }
    }
 
+/*
    fn next_line(&mut self)
       -> Option<&'a mut Line<'a>>
    {
@@ -988,16 +970,18 @@ impl <'a> InternalLexer<'a>
          None
       }
    }
+*/
+
+   fn process_identifier(&mut self, end: usize)
+      -> Option<(usize, ResultToken)>
+   {
+      let token = keyword_lookup(self.text[0..end].to_owned());
+      self.update_text(end);
+      Some((self.line_number, Ok(token)))
+   }
 }
 
-fn process_identifier(mut current_line: Line, end: usize)
-   -> (Option<(usize, ResultToken)>, Option<Line>)
-{
-   let token = keyword_lookup(current_line.line[0..end].to_owned());
-   current_line.line = &current_line.line[end..];
-   (Some((current_line.number, Ok(token))), Some(current_line))
-}
-
+/*
 fn process_float(mut current_line: Line, end: usize)
    -> (Option<(usize, ResultToken)>, Option<Line>)
 {
@@ -1201,13 +1185,14 @@ fn match_pair_eq_opt(line: &mut Line, initial_token: Token,
    let weq = token.with_equal();
    match_pair_opt(token, line, '=', weq)
 }
+*/
 
 fn consume_space_to_next(text: &mut &str)
 {
-   match SPACE_START_RE.find(text)
+   match SPACE_RE.find(text)
    {
       None => (),
-      Some(start, end) => *text = &text[end..],
+      Some((start, end)) => *text = &text[end..],
    }
 }
 
@@ -1237,7 +1222,7 @@ fn process_character(count: u32, c: char)
 }
 
 fn count_indentation<'a>(line: &mut &'a str)
-   -> (u32, &'a str)
+   -> u32
 {
    let mut count = 0;
    let mut spaces = 0;
@@ -1255,9 +1240,8 @@ fn count_indentation<'a>(line: &mut &'a str)
       }
    }
 
-   let leading_spaces = &line[0..spaces];
    *line = &line[spaces..];
-   (count, leading_spaces)
+   count
 }
 
 /*
@@ -1268,10 +1252,10 @@ fn count_indentation<'a>(line: &mut &'a str)
 
 lazy_static!
 {
-   static ref LINE_SPLIT_RE : Regex = Regex::new(r"\n|\r\n|\r|$").unwrap();
-   static ref LOGICAL_EOL_RE : Regex = Regex::new(r"^$ | ^#").unwrap();
-   static ref SPACE_START_RE : Regex = Regex::new(r"^[:space:]").unwrap();
-   static ref LINE_JOIN_START_RE : Regex = Regex::new(r"^\").unwrap();
+   static ref LOGICAL_EOL_RE : Regex = Regex::new(r"^$|^#.*(:?\r\n|\r|\n|$)|^\r\n|^\r|^\n").unwrap();
+   static ref SPACE_RE : Regex = Regex::new(r"^[ \t\f]*").unwrap();
+   static ref LINE_JOIN_START_RE : Regex = Regex::new(r"^\\").unwrap();
+   static ref LINE_JOIN_RE : Regex = Regex::new(r"^\\(?:\r\n|\r|\n)").unwrap();
    static ref STRING_START_RE : Regex =
       Regex::new(r#"^['"]|^[uU]['"]|^[rR]['"]"#).unwrap();
    static ref BYTES_START_RE : Regex =
@@ -1320,7 +1304,7 @@ mod tests
    #[test]
    fn test_identifiers()
    {
-      let chars = "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \n";
+      let chars = "abf  \x0C _xyz\n   \n  e2f\n  \tmq3\nn12\\\r\nn3\\ \n  n23\n    n24\n   n25     # monkey says what?  \nafter_comment";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("abf".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Identifier("_xyz".to_owned())))));
@@ -1346,9 +1330,11 @@ mod tests
       assert_eq!(l.next(), Some((9, Err(LexerError::Dedent))));
       assert_eq!(l.next(), Some((9, Ok(Token::Identifier("n25".to_owned())))));
       assert_eq!(l.next(), Some((9, Ok(Token::Newline))));
-      assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((10, Ok(Token::Dedent))));
+      assert_eq!(l.next(), Some((10, Ok(Token::Identifier("after_comment".to_owned())))));
    }   
 
+/*
    #[test]
    fn test_numbers()
    {
@@ -1416,7 +1402,7 @@ mod tests
    #[test]
    fn test_symbols()
    {
-      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-***///%@<<>>&|^~<><=>===!=!...";
+      let chars = "(){}[]:,.;..===@->+=-=*=/=//=%=@=&=|=^=>>=<<=**=+-*** ///%@<<>>&|^~<><=>===!=!...";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Lparen))));
       assert_eq!(l.next(), Some((1, Ok(Token::Rparen))));
@@ -1877,4 +1863,5 @@ mod tests
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), None);
    }
+*/
 }
