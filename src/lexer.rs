@@ -222,44 +222,51 @@ impl <'a> InternalLexer<'a>
                self.process_byte_string()
             }
 */
-            else if let Some((_, end)) = ID_START_RE.find(self.text)
+            else if let Some((_, end)) = ID_RE.find(self.text)
             {
                self.process_identifier(end)
             }
-/*
-            else if let Some((_, end)) = FLOAT_START_RE.find(self.text)
+            else if let Some((_, end)) = FLOAT_RE.find(self.text)
             {
                self.process_float(end)
             }
-            else if let Some((_, end)) = INT_IMG_START_RE.find(self.text)
+            else if let Some((_, end)) = INT_IMG_RE.find(self.text)
             {
                self.process_number(end, |s| Token::Imaginary(s))
             }
-            else if let Some((_, end)) = DEC_START_RE.find(self.text)
+            else if let Some((_, end)) = INVALID_DEC_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::DecInteger(s))
+               self.update_text(end);
+               Some((self.line_number, Err(LexerError::MalformedFloat)))
             }
-            else if let Some((_, end)) = HEX_START_RE.find(self.text)
+            else if let Some((_, end)) = HEX_RE.find(self.text)
             {
                self.process_number(end, |s| Token::HexInteger(s))
             }
-            else if let Some((_, end)) = OCT_START_RE.find(self.text)
+            else if let Some((_, end)) = OCT_RE.find(self.text)
             {
                self.process_number(end, |s| Token::OctInteger(s))
             }
-            else if let Some((_, end)) = BIN_START_RE.find(self.text)
+            else if let Some((_, end)) = BIN_RE.find(self.text)
             {
                self.process_number(end, |s| Token::BinInteger(s))
             }
-*/
+            else if let Some((_, end)) = INVALID_ZERO_PRE_RE.find(self.text)
+            {
+               self.update_text(end);
+               Some((self.line_number, Err(LexerError::MissingDigits)))
+            }
+            else if let Some((_, end)) = DEC_RE.find(self.text)
+            {
+               self.process_number(end, |s| Token::DecInteger(s))
+            }
             else if let Some((_, end)) = LINE_JOIN_START_RE.find(self.text)
             {
                self.process_line_join(end)
             }
             else
             {
-               // self.process_symbols()
-               unimplemented!();
+               self.process_symbols()
             }
          }
       }
@@ -800,14 +807,25 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-/*
-   fn process_symbols(&mut self, mut line: Line<'a>)
-      -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
+   fn process_symbols(&mut self)
+      -> Option<(usize, ResultToken)>
    {
+      if let Some((_, end)) = SYM_DOT_RE.find(self.text)
+      {
+         self.update_text(end);
+         Some((self.line_number, Ok(Token::Dot)))
+      }
+      else
+      {
+         unimplemented!();
+      }
+/*
       let result = self.build_symbol(&mut line);
       (Some(result), Some(line))
+*/
    }
 
+/*
    fn build_symbol(&mut self, line: &mut Line<'a>)
       -> (usize, ResultToken)
    {
@@ -979,38 +997,36 @@ impl <'a> InternalLexer<'a>
       self.update_text(end);
       Some((self.line_number, Ok(token)))
    }
+
+   fn process_float(&mut self, end: usize)
+      -> Option<(usize, ResultToken)>
+   {
+      let rest = &self.text[end..];
+      if let Some((_, end_img)) = IMG_SUFFIX_RE.find(rest)
+      {
+         let token_str = self.text[..(end + end_img)].to_owned();
+         self.update_text(end + end_img);
+         Some((self.line_number, Ok(Token::Imaginary(token_str))))
+      }
+      else
+      {
+         let token_str = self.text[..end].to_owned();
+         self.update_text(end);
+         Some((self.line_number, Ok(Token::Float(token_str))))
+      }
+   }
+
+   fn process_number<F>(&mut self, end: usize, ctor: F)
+      -> Option<(usize, ResultToken)>
+      where F : Fn(String) -> Token
+   {
+      let token_str = self.text[0..end].to_owned();
+      self.update_text(end);
+      Some((self.line_number, Ok(ctor(token_str)))) 
+   }
 }
 
 /*
-fn process_float(mut current_line: Line, end: usize)
-   -> (Option<(usize, ResultToken)>, Option<Line>)
-{
-   let rest = &current_line.line[end..];
-   if let Some((_, end_img)) = IMG_SUFFIX_START_RE.is_match(rest)
-   {
-      current_line.line = &current_line.line[(end + end_img)..];
-      let token_str = current_line.line[0..(end + end_img)].to_owned();
-      (Some((current_line.number, Ok(Token::Imaginary(token_str)))),
-         Some(current_line))
-   }
-   else
-   {
-      current_line.line = rest;
-      let token_str = current_line.line[0..end].to_owned();
-      (Some((current_line.number, Ok(Token::Float(token_str)))),
-         Some(current_line))
-   }
-}
-
-fn process_number<F>(mut current_line: Line, end: usize, ctor: F)
-   -> (Option<(usize, ResultToken)>, Option<Line>)
-   where F : Fn(String) -> Token
-{
-   let token_str = current_line.line[0..end].to_owned();
-   current_line.line = &current_line.line[end..];
-   (Some((current_line.number, Ok(ctor(token_str)))), 
-      Some(current_line))
-}
 
 fn push_octal_character(mut line: Line, mut token_str: String, c: char)
    -> (Option<Line>, Result<String, LexerError>)
@@ -1260,7 +1276,7 @@ lazy_static!
       Regex::new(r#"^['"]|^[uU]['"]|^[rR]['"]"#).unwrap();
    static ref BYTES_START_RE : Regex =
       Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
-   static ref ID_START_RE : Regex =
+   static ref ID_RE : Regex =
       Regex::new(r"(?x)^
          [\p{Lu}\p{Ll}\p{Lt}\p{Lm}\p{Lo}\p{Nl}     # letters
             _
@@ -1272,20 +1288,23 @@ lazy_static!
             \p{Mn}\p{Mc}\p{Nd}\p{Pc}               # Number and Connectors
             \x{00B7}\x{0387}\x{1369}-\x{1371}\x{19DA} # Other_ID_Continue
          ]*").unwrap();
-   static ref BIN_START_RE : Regex = Regex::new(r"^0[bB][01]+").unwrap();
-   static ref OCT_START_RE : Regex = Regex::new(r"^0[oO][0-7]+").unwrap();
-   static ref HEX_START_RE : Regex = Regex::new(r"^0[xX][:xdigit:]+").unwrap();
-   static ref DEC_START_RE : Regex = Regex::new(r"^0+|^[1-9]\d*").unwrap();
-   static ref INT_IMG_START_RE : Regex = Regex::new(r"^\d+[jJ]").unwrap();
-   static ref IMG_SUFFIX_START_RE : Regex = Regex::new(r"^[jJ]").unwrap();
-   static ref FLOAT_START_RE : Regex =
+   static ref BIN_RE : Regex = Regex::new(r"^0[bB][01]+").unwrap();
+   static ref OCT_RE : Regex = Regex::new(r"^0[oO][0-7]+").unwrap();
+   static ref HEX_RE : Regex = Regex::new(r"^0[xX][:xdigit:]+").unwrap();
+   static ref DEC_RE : Regex = Regex::new(r"^0+|^[1-9]\d*").unwrap();
+   static ref INVALID_DEC_RE : Regex = Regex::new(r"^0+[1-9]+").unwrap();
+   static ref INVALID_ZERO_PRE_RE : Regex = Regex::new(r"^0[xX]|^0[bB]|^0[oO]").unwrap();
+   static ref INT_IMG_RE : Regex = Regex::new(r"^\d+[jJ]").unwrap();
+   static ref IMG_SUFFIX_RE : Regex = Regex::new(r"^[jJ]").unwrap();
+   static ref FLOAT_RE : Regex =
       Regex::new(r"(?x)
-         ^\d+[eE][\+-]\d+     # dddddE+ddd
+         ^\d+[eE][\+-]?\d+     # dddddE+ddd
          | ^(?:
             \.\d+             # .ddddd
             | \d+\.(?:\d+)?   # dddddd. or ddddddd.ddddd
-            )([eE][\+-]\d+)?  # optionally E+ddddd
+            )([eE][\+-]?\d+)?  # optionally E+ddddd
       ").unwrap();
+   static ref SYM_DOT_RE : Regex = Regex::new(r"^\.").unwrap();
 }
 
 /*
@@ -1334,11 +1353,10 @@ mod tests
       assert_eq!(l.next(), Some((10, Ok(Token::Identifier("after_comment".to_owned())))));
    }   
 
-/*
    #[test]
    fn test_numbers()
    {
-      let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . 3..2\n";
+      let chars = "1 123 456 45 23.742 23. 12..3 .14 0123.2192 077e010 12e17 12e+17 12E-17 0 00000 00003 0.2 .e12 0o724 0X32facb7 0b10101010 0x 0b 0o9 00000e+00000 79228162514264337593543950336 0xdeadbeef 037j 2.3j 2.j .3j . 3..2\n";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("1".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("123".to_owned())))));
@@ -1364,6 +1382,9 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0X32facb7".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::BinInteger("0b10101010".to_owned())))));
       assert_eq!(l.next(), Some((1, Err(LexerError::MissingDigits))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MissingDigits))));
+      assert_eq!(l.next(), Some((1, Err(LexerError::MissingDigits))));
+      assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("9".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::Float("00000e+00000".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::DecInteger("79228162514264337593543950336".to_owned())))));
       assert_eq!(l.next(), Some((1, Ok(Token::HexInteger("0xdeadbeef".to_owned())))));
@@ -1377,6 +1398,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }   
 
+/*
    #[test]
    fn test_dedent()
    {
