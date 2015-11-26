@@ -270,6 +270,11 @@ impl <'a> InternalLexer<'a>
             }
          }
       }
+      else if self.indent_stack.len() > 1
+      {
+         self.indent_stack.pop();
+         Some((0, Ok(Token::Dedent)))
+      }
       else
       {
          None
@@ -324,7 +329,7 @@ impl <'a> InternalLexer<'a>
             let contents = caps.at(1).unwrap_or("");
             let newlines = NEWLINE_RE.find_iter(&contents).count();
             let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
-               process_escape_sequence(caps));
+               process_escape_sequence(caps.at(1).unwrap_or("")));
             self.update_text(end);
             self.line_number += newlines;
             Some((self.line_number - newlines, Ok(Token::String(expanded))))
@@ -957,63 +962,24 @@ impl <'a> InternalLexer<'a>
    }
 }
 
-fn process_escape_sequence(caps: &Captures)
+fn process_escape_sequence(escaped: &str)
    -> String
 {
-   match caps.at(1).unwrap_or("")
+   match escaped
    {
-      "\\\n" | "\\\r" | "\\\r\n" => "".to_owned(),
-      "\\\\" => "\\".to_owned(),
-      "\\'" => "'".to_owned(),
-      "\\\"" => "\"".to_owned(),
-      "\\a" => "\x07".to_owned(),
-      "\\b" => "\x08".to_owned(),
-      "\\f" => "\x0C".to_owned(),
-      "\\n" => "\n".to_owned(),
-      "\\r" => "\r".to_owned(),
-      "\\t" => "\t".to_owned(),
-      "\\v" => "\x0B".to_owned(),
-/*
-      Some(c) if c.is_digit(8) && !is_raw =>   // octal
+      "\n" | "\r" | "\r\n" => "".to_owned(),
+      "\\" => "\\".to_owned(),
+      "'" => "'".to_owned(),
+      "\"" => "\"".to_owned(),
+      "a" => "\x07".to_owned(),
+      "b" => "\x08".to_owned(),
+      "f" => "\x0C".to_owned(),
+      "n" => "\n".to_owned(),
+      "r" => "\r".to_owned(),
+      "t" => "\t".to_owned(),
+      "v" => "\x0B".to_owned(),
+      escaped =>
       {
-         let (new_line, token_res) =
-            push_octal_character(line, token_str, c);
-         (new_line, token_res)
-      },
-      Some('x') =>
-      {
-         let (new_line, token_res) =
-            push_hex_character(line, token_str);
-         (new_line, token_res)
-      },
-      Some('N') =>
-      {
-         let (new_line, token_res) =
-            push_named_character(line, token_str);
-         (new_line, token_res)
-      },
-      Some('u') =>
-      {
-         let (new_line, token_res) =
-            push_unicode_character(line, token_str, 4);
-         (new_line, token_res)
-      },
-      Some('U') =>
-      {
-         let (new_line, token_res) =
-            push_unicode_character(line, token_str, 8);
-         (new_line, token_res)
-      },
-      Some(c) =>
-      {
-         token_str.push('\\');
-         token_str.push(c);
-         (Some(line), Ok(token_str))
-      },
-*/
-      s =>
-      {
-         let escaped = caps.at(2).unwrap_or("");
          if OCT_ESCAPE_RE.is_match(escaped)
          {
             char::from_u32(u32::from_str_radix(escaped, 8)
@@ -1024,9 +990,22 @@ fn process_escape_sequence(caps: &Captures)
             char::from_u32(u32::from_str_radix(&escaped[1..], 16)
                .unwrap()).unwrap().to_string()
          }
+         else if UNICODE_ESCAPE_RE.is_match(escaped)
+         {
+            char::from_u32(u32::from_str_radix(&escaped[1..], 16)
+               .unwrap()).unwrap().to_string()
+         }
+         else if let Some(name_cap) = UNICODE_NAME_RE.captures(escaped)
+         {
+            match unicode_names::character(name_cap.at(1).unwrap_or(""))
+            {
+               Some(c) => c.to_string(),
+               _ => "\\".to_owned() + escaped,
+            }
+         }
          else
          {
-            s.to_owned()
+            "\\".to_owned() + escaped
          }
       },
    }
@@ -1343,9 +1322,15 @@ lazy_static!
       Regex::new(r#"^(?s)((?:[^\\]|\\.|\\\r\n)*?)$"#).unwrap();
    static ref NEWLINE_RE : Regex = Regex::new(r"\r\n|\r|\n").unwrap();
    static ref ESCAPES_RE : Regex =
-      Regex::new(r#"(\\(\r\n|\r|\n|\\|'|"|a|b|f|n|r|t|v|[0-7]{1,3}|x[:xdigit:]{2}))"#).unwrap();
+      Regex::new(r#"\\(\r\n|\r|\n|\\|'|"|a|b|f|n|r|t|v|[0-7]{1,3}|x[:xdigit:]{2}|u[:xdigit:]{4}|U[:xdigit:]{8}|N\{[^\r\n\}'"]*\})"#).unwrap();
    static ref OCT_ESCAPE_RE : Regex = Regex::new("^[0-7]{1,3}").unwrap();
    static ref HEX_ESCAPE_RE : Regex = Regex::new("^x[:xdigit:]{2}").unwrap();
+   static ref UNICODE_ESCAPE_RE : Regex =
+      Regex::new("^(?:u[:xdigit:]{4}|U[:xdigit:]{8})").unwrap();
+   static ref UNICODE_NAME_RE : Regex =
+      Regex::new(r#"^N\{([^\r\n\}'"]*)\}"#).unwrap();
+   //static ref ESCAPES_FAIL_RE : Regex =
+      //Regex::new("
 }
 
 /*
@@ -1659,7 +1644,6 @@ mod tests
       assert_eq!(l.next(), Some((5, Ok(Token::Newline))));
    }
 
-/*
    #[test]
    fn test_strings_6()
    {
@@ -1757,6 +1741,7 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }
 
+/*
    #[test]
    fn test_strings_17()
    {
@@ -1772,6 +1757,7 @@ mod tests
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello ǀÀ".to_owned())))));
    }
+*/
 
    #[test]
    fn test_strings_19()
@@ -1781,6 +1767,7 @@ mod tests
       assert_eq!(l.next(), Some((2, Err(LexerError::UnterminatedTripleString))));
    }
 
+/*
    #[test]
    fn test_byte_strings_1()
    {
@@ -1844,6 +1831,7 @@ mod tests
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
    }
+*/
 
    #[test]
    fn test_implicit_1()
@@ -1907,7 +1895,6 @@ mod tests
       assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((3, Ok(Token::Indent))));
       assert_eq!(l.next(), Some((3, Ok(Token::Identifier("first".to_owned())))));
-      assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), Some((0, Ok(Token::Dedent))));
    }
 
@@ -1932,5 +1919,4 @@ mod tests
       assert_eq!(l.next(), Some((3, Ok(Token::Newline))));
       assert_eq!(l.next(), None);
    }
-*/
 }
