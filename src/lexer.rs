@@ -7,7 +7,7 @@ use std::char;
 use std::str::Chars;
 use iter::MultiPeekable;
 
-use regex::{Regex, Captures};
+use regex::{Regex, Captures, FindCaptures};
 use std::cmp;
 use std::iter::Peekable;
 use tokens::{Token, keyword_lookup, symbol_lookup};
@@ -329,7 +329,7 @@ impl <'a> InternalLexer<'a>
             let contents = caps.at(1).unwrap_or("");
             let newlines = NEWLINE_RE.find_iter(&contents).count();
             if let Some(err) =
-               check_escape_errors(ESCAPES_FAIL_RE.captures(contents))
+               check_escape_errors(ESCAPES_FAIL_RE.captures_iter(contents))
             {
                return Some((self.line_number, Err(err)))
             }
@@ -1016,47 +1016,46 @@ fn process_escape_sequence(escaped: &str)
    }
 }
 
-fn check_escape_errors(caps: Option<Captures>)
+fn check_escape_errors(caps_iter: FindCaptures)
    -> Option<LexerError>
 {
-   if caps.is_none() { return None; }
-   let caps = caps.unwrap();
-
-   if let Some(_) = caps.name("badu")
+   for caps in caps_iter
    {
-      Some(LexerError::MalformedUnicodeEscape)
+      if let Some(_) = caps.name("badu")
+      {
+         return Some(LexerError::MalformedUnicodeEscape)
+      }
+      else if let Some(_) = caps.name("badU")
+      {
+         return Some(LexerError::MalformedUnicodeEscape)
+      }
+      else if let Some(s) = caps.name("name")
+      {
+         let name_cap = UNICODE_NAME_RE.captures(s).unwrap();
+         let name = name_cap.at(1).unwrap_or("").to_owned();
+         if unicode_names::character(&name).is_none()
+         {
+            return Some(LexerError::UnknownUnicodeName(name))
+         }
+      }
+      else if let Some(_) = caps.name("end")
+      {
+         return Some(LexerError::MalformedNamedUnicodeEscape)
+      }
+      else if let Some(_) = caps.name("start")
+      {
+         return Some(LexerError::MalformedNamedUnicodeEscape)
+      }
+      else if let Some(_) = caps.name("none")
+      {
+         return Some(LexerError::MalformedNamedUnicodeEscape)
+      }
+      else if let Some(_) = caps.name("badx")
+      {
+         return Some(LexerError::HexEscapeShort)
+      }
    }
-   else if let Some(_) = caps.name("badU")
-   {
-      Some(LexerError::MalformedUnicodeEscape)
-   }
-   else if let Some(s) = caps.name("name")
-   {
-      let name_cap = UNICODE_NAME_RE.captures(s).unwrap();
-      let name = name_cap.at(1).unwrap_or("").to_owned();
-      unicode_names::character(&name).map_or(
-         Some(LexerError::UnknownUnicodeName(name)), |_| None)
-   }
-   else if let Some(_) = caps.name("end")
-   {
-      Some(LexerError::MalformedNamedUnicodeEscape)
-   }
-   else if let Some(_) = caps.name("start")
-   {
-      Some(LexerError::MalformedNamedUnicodeEscape)
-   }
-   else if let Some(_) = caps.name("none")
-   {
-      Some(LexerError::MalformedNamedUnicodeEscape)
-   }
-   else if let Some(_) = caps.name("badx")
-   {
-      Some(LexerError::HexEscapeShort)
-   }
-   else
-   {
-      None
-   }
+   None
 }
 
 /*
@@ -1837,6 +1836,14 @@ mod tests
       let chars = "'\\x7y'";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
+   }
+
+   #[test]
+   fn test_strings_22()
+   {
+      let chars = "'\\N{monkey}\\N{fhefaefi}'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::UnknownUnicodeName("fhefaefi".to_owned())))));
    }
 
 /*
