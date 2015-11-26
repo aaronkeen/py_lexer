@@ -328,6 +328,11 @@ impl <'a> InternalLexer<'a>
             let caps = re.captures(self.text).unwrap();
             let contents = caps.at(1).unwrap_or("");
             let newlines = NEWLINE_RE.find_iter(&contents).count();
+            if let Some(err) =
+               check_escape_errors(ESCAPES_FAIL_RE.captures(contents))
+            {
+               return Some((self.line_number, Err(err)))
+            }
             let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
                process_escape_sequence(caps.at(1).unwrap_or("")));
             self.update_text(end);
@@ -1011,8 +1016,50 @@ fn process_escape_sequence(escaped: &str)
    }
 }
 
-/*
+fn check_escape_errors(caps: Option<Captures>)
+   -> Option<LexerError>
+{
+   if caps.is_none() { return None; }
+   let caps = caps.unwrap();
 
+   if let Some(_) = caps.name("badu")
+   {
+      Some(LexerError::MalformedUnicodeEscape)
+   }
+   else if let Some(_) = caps.name("badU")
+   {
+      Some(LexerError::MalformedUnicodeEscape)
+   }
+   else if let Some(s) = caps.name("name")
+   {
+      let name_cap = UNICODE_NAME_RE.captures(s).unwrap();
+      let name = name_cap.at(1).unwrap_or("").to_owned();
+      unicode_names::character(&name).map_or(
+         Some(LexerError::UnknownUnicodeName(name)), |_| None)
+   }
+   else if let Some(_) = caps.name("end")
+   {
+      Some(LexerError::MalformedNamedUnicodeEscape)
+   }
+   else if let Some(_) = caps.name("start")
+   {
+      Some(LexerError::MalformedNamedUnicodeEscape)
+   }
+   else if let Some(_) = caps.name("none")
+   {
+      Some(LexerError::MalformedNamedUnicodeEscape)
+   }
+   else if let Some(_) = caps.name("badx")
+   {
+      Some(LexerError::HexEscapeShort)
+   }
+   else
+   {
+      None
+   }
+}
+
+/*
 fn push_octal_character(mut line: Line, mut token_str: String, c: char)
    -> (Option<Line>, Result<String, LexerError>)
 {
@@ -1329,8 +1376,17 @@ lazy_static!
       Regex::new("^(?:u[:xdigit:]{4}|U[:xdigit:]{8})").unwrap();
    static ref UNICODE_NAME_RE : Regex =
       Regex::new(r#"^N\{([^\r\n\}'"]*)\}"#).unwrap();
-   //static ref ESCAPES_FAIL_RE : Regex =
-      //Regex::new("
+   static ref ESCAPES_FAIL_RE : Regex =
+      Regex::new(r#"(?x)\\ (?:
+         (?P<badu>u[:xdigit:]{0,3}(?:[:^xdigit:]|$))   # too few digits
+         |(?P<badU>U[:xdigit:]{0,7}(?:[:^xdigit:]|$))  # too few digits
+         |(?P<name>N\{[^\r\n\}'"]*\})                  # check for invalid name
+         |(?P<end>N\{[^\r\n\}'"]*(?:[^\}]|$))  # potentially missing end brace
+                                               #  if not missing, caught above
+         |(?P<start>N[^\{])                    # missing start brace
+         |(?P<none>N$)                         # no brace at all
+         |(?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))      # too few digits
+      )"#).unwrap();
 }
 
 /*
@@ -1765,6 +1821,22 @@ mod tests
       let chars = "'''hello\\\n";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((2, Err(LexerError::UnterminatedTripleString))));
+   }
+
+   #[test]
+   fn test_strings_20()
+   {
+      let chars = "'\\N'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
+   }
+
+   #[test]
+   fn test_strings_21()
+   {
+      let chars = "'\\x7y'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
    }
 
 /*
