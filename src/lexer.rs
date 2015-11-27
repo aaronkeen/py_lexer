@@ -325,7 +325,7 @@ impl <'a> InternalLexer<'a>
       {
          Some((_, end)) =>
          {
-            self.build_string_contents(end, re)
+            self.build_string_contents(end, re, raw)
          },
          None =>
          {
@@ -334,22 +334,30 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn build_string_contents(&mut self, end: usize, re: &Regex)
+   fn build_string_contents(&mut self, end: usize, re: &Regex, raw: bool)
       -> Option<(usize, ResultToken)>
    {
       let caps = re.captures(self.text).unwrap();
       let contents = caps.at(1).unwrap_or("");
       let newlines = NEWLINE_RE.find_iter(&contents).count();
-      if let Some(err) = check_escape_errors(contents)
-      {
-         // this check also iterates over structurally valid
-         // named unicode characters - duplicating the some of
-         // the iteration done below in replace_all - this is
-         // kept separate for code clarity, but can be merged if needed
-         return Some((self.line_number, Err(err)))
-      }
-      let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
-            process_escape_sequence(caps.at(1).unwrap_or("")));
+      let expanded =
+         if !raw
+         {
+            if let Some(err) = check_escape_errors(contents)
+            {
+               // this check also iterates over structurally valid
+               // named unicode characters - duplicating the some of
+               // the iteration done below in replace_all - this is
+               // kept separate for code clarity, but can be merged if needed
+               return Some((self.line_number, Err(err)))
+            }
+            ESCAPES_RE.replace_all(contents, |caps: &Captures|
+               process_escape_sequence(caps.at(1).unwrap_or("")))
+         }
+         else
+         {
+            contents.to_owned()
+         };
       self.update_text(end);
       self.line_number += newlines;
       Some((self.line_number - newlines, Ok(Token::String(expanded))))
@@ -1826,7 +1834,6 @@ mod tests
       assert_eq!(l.next(), Some((1, Ok(Token::Newline))));
    }
 
-/*
    #[test]
    fn test_strings_17()
    {
@@ -1842,7 +1849,6 @@ mod tests
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::String("\\txyz \\\n \\'fefe \\N{monkey}hello ǀÀ".to_owned())))));
    }
-*/
 
    #[test]
    fn test_strings_19()
