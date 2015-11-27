@@ -325,28 +325,44 @@ impl <'a> InternalLexer<'a>
       {
          Some((_, end)) =>
          {
-            let caps = re.captures(self.text).unwrap();
-            let contents = caps.at(1).unwrap_or("");
-            let newlines = NEWLINE_RE.find_iter(&contents).count();
-            if let Some(err) = check_escape_errors(contents)
-            {
-               return Some((self.line_number, Err(err)))
-            }
-            let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
-                  process_escape_sequence(caps.at(1).unwrap_or("")));
-            self.update_text(end);
-            self.line_number += newlines;
-            Some((self.line_number - newlines, Ok(Token::String(expanded))))
+            self.build_string_contents(end, re)
          },
          None =>
          {
-            let (_, end) = fail.find(self.text).unwrap();
-            let newlines = NEWLINE_RE.find_iter(&self.text[..end]).count();
-            self.update_text(end);
-            self.line_number += newlines;
-            Some((self.line_number, Err(err)))
+            self.handle_string_err(fail, err)
          },
       }
+   }
+
+   fn build_string_contents(&mut self, end: usize, re: &Regex)
+      -> Option<(usize, ResultToken)>
+   {
+      let caps = re.captures(self.text).unwrap();
+      let contents = caps.at(1).unwrap_or("");
+      let newlines = NEWLINE_RE.find_iter(&contents).count();
+      if let Some(err) = check_escape_errors(contents)
+      {
+         // this check also iterates over structurally valid
+         // named unicode characters - duplicating the some of
+         // the iteration done below in replace_all - this is
+         // kept separate for code clarity, but can be merged if needed
+         return Some((self.line_number, Err(err)))
+      }
+      let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
+            process_escape_sequence(caps.at(1).unwrap_or("")));
+      self.update_text(end);
+      self.line_number += newlines;
+      Some((self.line_number - newlines, Ok(Token::String(expanded))))
+   }
+
+   fn handle_string_err(&mut self, fail: &Regex, err: LexerError)
+      -> Option<(usize, ResultToken)>
+   {
+      let (_, end) = fail.find(self.text).unwrap();
+      let newlines = NEWLINE_RE.find_iter(&self.text[..end]).count();
+      self.update_text(end);
+      self.line_number += newlines;
+      Some((self.line_number, Err(err)))
    }
 /*
    fn process_string(&mut self, mut line: Line<'a>)
