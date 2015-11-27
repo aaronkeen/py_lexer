@@ -328,13 +328,12 @@ impl <'a> InternalLexer<'a>
             let caps = re.captures(self.text).unwrap();
             let contents = caps.at(1).unwrap_or("");
             let newlines = NEWLINE_RE.find_iter(&contents).count();
-            if let Some(err) =
-               check_escape_errors(ESCAPES_FAIL_RE.captures(contents))
+            if let Some(err) = check_escape_errors(contents)
             {
                return Some((self.line_number, Err(err)))
             }
             let expanded = ESCAPES_RE.replace_all(contents, |caps: &Captures|
-               process_escape_sequence(caps.at(1).unwrap_or("")));
+                  process_escape_sequence(caps.at(1).unwrap_or("")));
             self.update_text(end);
             self.line_number += newlines;
             Some((self.line_number - newlines, Ok(Token::String(expanded))))
@@ -1016,7 +1015,15 @@ fn process_escape_sequence(escaped: &str)
    }
 }
 
-fn check_escape_errors(caps: Option<Captures>)
+fn check_escape_errors(s: &str)
+   -> Option<LexerError>
+{
+   check_non_named_escape_errors(ESCAPES_FAIL_RE.captures(s))
+      .or_else(|| check_named_escape_errors(
+         UNICODE_NAMED_ESCAPE_RE.captures_iter(s)))
+}
+
+fn check_non_named_escape_errors(caps: Option<Captures>)
    -> Option<LexerError>
 {
    if caps.is_none() { return None; }
@@ -1046,6 +1053,21 @@ fn check_escape_errors(caps: Option<Captures>)
    {
       None
    }
+}
+
+fn check_named_escape_errors(caps: FindCaptures)
+   -> Option<LexerError>
+{
+   for cap in caps
+   {
+      let cap_name = cap.at(1).unwrap_or("");
+      match unicode_names::character(cap_name)
+      {
+         Some(_) => (),
+         _ => return Some(LexerError::UnknownUnicodeName(cap_name.to_owned())),
+      }
+   }
+   None
 }
 
 /*
@@ -1364,15 +1386,19 @@ lazy_static!
    static ref UNICODE_ESCAPE_RE : Regex =
       Regex::new("^(?:u[:xdigit:]{4}|U[:xdigit:]{8})").unwrap();
    static ref UNICODE_NAME_RE : Regex =
-      Regex::new(r#"^N\{([^\r\n\}'"]*)\}"#).unwrap();
+      Regex::new(r#"^N\{([^\r\n\}]*)\}"#).unwrap();
+}
+lazy_static!      // Recursion limit reached above o.O
+{
+   static ref UNICODE_NAMED_ESCAPE_RE : Regex =
+      Regex::new(r#"\\N\{([^\r\n\}]*)\}"#).unwrap();
    static ref ESCAPES_FAIL_RE : Regex =
       Regex::new(r#"(?x)\\ (?:
-         (?P<badu>u[:xdigit:]{0,3}(?:[:^xdigit:]|$))   # too few digits
-         |(?P<badU>U[:xdigit:]{0,7}(?:[:^xdigit:]|$))  # too few digits
-         |(?P<end>N\{[^\r\n\}]*(?:[\r\n]|$))  # potentially missing end brace
-                                               #  if not missing, caught above
-         |(?P<start>N(?:[^\{]|$))              # missing start brace
-         |(?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))      # too few digits
+         (?P<badu>u[:xdigit:]{0,3}(?:[:^xdigit:]|$))     # too few digits
+         |(?P<badU>U[:xdigit:]{0,7}(?:[:^xdigit:]|$))    # too few digits
+         |(?P<end>N\{[^\r\n\}]*(?:[\r\n]|$))             # missing end brace
+         |(?P<start>N(?:[^\{]|$))                        # missing start brace
+         |(?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))        # too few digits
       )"#).unwrap();
 }
 
