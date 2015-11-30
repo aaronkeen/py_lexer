@@ -203,7 +203,7 @@ impl <'a> InternalLexer<'a>
          }
          else if self.dedent_count != 0
          {
-            self.process_dedents()
+            Some(self.process_dedents())
          }
          else
          {
@@ -222,15 +222,15 @@ impl <'a> InternalLexer<'a>
             }
             else if let Some((_, end)) = ID_RE.find(self.text)
             {
-               self.process_identifier(end)
+               Some(self.process_identifier(end))
             }
             else if let Some((_, end)) = FLOAT_RE.find(self.text)
             {
-               self.process_float(end)
+               Some(self.process_float(end))
             }
             else if let Some((_, end)) = INT_IMG_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::Imaginary(s))
+               Some(self.process_number(end, |s| Token::Imaginary(s)))
             }
             else if let Some((_, end)) = INVALID_DEC_RE.find(self.text)
             {
@@ -239,15 +239,15 @@ impl <'a> InternalLexer<'a>
             }
             else if let Some((_, end)) = HEX_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::HexInteger(s))
+               Some(self.process_number(end, |s| Token::HexInteger(s)))
             }
             else if let Some((_, end)) = OCT_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::OctInteger(s))
+               Some(self.process_number(end, |s| Token::OctInteger(s)))
             }
             else if let Some((_, end)) = BIN_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::BinInteger(s))
+               Some(self.process_number(end, |s| Token::BinInteger(s)))
             }
             else if let Some((_, end)) = INVALID_ZERO_PRE_RE.find(self.text)
             {
@@ -256,7 +256,7 @@ impl <'a> InternalLexer<'a>
             }
             else if let Some((_, end)) = DEC_RE.find(self.text)
             {
-               self.process_number(end, |s| Token::DecInteger(s))
+               Some(self.process_number(end, |s| Token::DecInteger(s)))
             }
             else if let Some((_, end)) = LINE_JOIN_START_RE.find(self.text)
             {
@@ -264,7 +264,7 @@ impl <'a> InternalLexer<'a>
             }
             else
             {
-               self.process_symbol()
+               Some(self.process_symbol())
             }
          }
       }
@@ -905,22 +905,22 @@ impl <'a> InternalLexer<'a>
    }
 
    fn process_dedents(&mut self)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       if self.dedent_count == -1
       {
          self.dedent_count = 0;
-         Some((self.line_number, Err(LexerError::Dedent)))
+         (self.line_number, Err(LexerError::Dedent))
       }
       else
       {
          self.dedent_count += if self.dedent_count < 0 {1} else {-1};
-         Some((self.line_number, Ok(Token::Dedent)))
+         (self.line_number, Ok(Token::Dedent))
       }
    }
 
    fn process_symbol(&mut self)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       if let Some((_, end)) = SYMBOLS_RE.find(self.text)
       {
@@ -932,21 +932,21 @@ impl <'a> InternalLexer<'a>
             "(" | "[" | "{" =>
             {
                self.open_braces += 1;
-               Some((self.line_number, symbol_lookup(result)))
+               (self.line_number, symbol_lookup(result))
             },
             ")" | "]" | "}" =>
             {
                self.open_braces = cmp::max(0, self.open_braces - 1);
-               Some((self.line_number, symbol_lookup(result)))
+               (self.line_number, symbol_lookup(result))
             },
-            sym => Some((self.line_number, symbol_lookup(sym)))
+            sym => (self.line_number, symbol_lookup(sym))
          }
       }
       else
       {
          let c = &self.text[..1];
          self.update_text(1); // skip one to allow progress
-         Some((self.line_number, Err(LexerError::InvalidSymbol(c.to_owned()))))
+         (self.line_number, Err(LexerError::InvalidSymbol(c.to_owned())))
       }
    }
 
@@ -988,38 +988,38 @@ impl <'a> InternalLexer<'a>
 */
 
    fn process_identifier(&mut self, end: usize)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       let token = keyword_lookup(&self.text[0..end]);
       self.update_text(end);
-      Some((self.line_number, Ok(token)))
+      (self.line_number, Ok(token))
    }
 
    fn process_float(&mut self, end: usize)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       let rest = &self.text[end..];
       if let Some((_, end_img)) = IMG_SUFFIX_RE.find(rest)
       {
          let token_str = self.text[..(end + end_img)].to_owned();
          self.update_text(end + end_img);
-         Some((self.line_number, Ok(Token::Imaginary(token_str))))
+         (self.line_number, Ok(Token::Imaginary(token_str)))
       }
       else
       {
          let token_str = self.text[..end].to_owned();
          self.update_text(end);
-         Some((self.line_number, Ok(Token::Float(token_str))))
+         (self.line_number, Ok(Token::Float(token_str)))
       }
    }
 
    fn process_number<F>(&mut self, end: usize, ctor: F)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
       where F : Fn(String) -> Token
    {
       let token_str = self.text[0..end].to_owned();
       self.update_text(end);
-      Some((self.line_number, Ok(ctor(token_str)))) 
+      (self.line_number, Ok(ctor(token_str)))
    }
 }
 
