@@ -13,6 +13,7 @@ pub enum LexerError
    MalformedUnicodeEscape,
    MalformedNamedUnicodeEscape,
    UnknownUnicodeName(String),
+   BytesNonASCII,
    MissingDigits,
    MalformedFloat,
    MalformedImaginary,
@@ -47,6 +48,8 @@ impl fmt::Display for LexerError
             write!(f, "unknown unicode name '{}'", s),
          LexerError::MissingDigits =>
             write!(f, "missing digits"),
+         LexerError::BytesNonASCII =>
+            write!(f, "bytes cannot contain non-ASCII characters"),
          LexerError::MalformedFloat =>
             write!(f, "malformed floating point number"),
          LexerError::MalformedImaginary =>
@@ -77,6 +80,8 @@ impl error::Error for LexerError
          LexerError::MalformedNamedUnicodeEscape =>
             "malformed named unicode escape",
          LexerError::UnknownUnicodeName(_) => "unknown unicode name",
+         LexerError::BytesNonASCII =>
+            "bytes cannot contain non-ASCII characters",
          LexerError::MissingDigits => "missing digits",
          LexerError::MalformedFloat => "malformed floating point number",
          LexerError::MalformedImaginary => "malformed imaginary number",

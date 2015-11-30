@@ -214,14 +214,12 @@ impl <'a> InternalLexer<'a>
             }
             else if STRING_START_RE.is_match(self.text)
             {
-               self.process_string()
+               Some(self.process_string())
             }
-/*
             else if BYTES_START_RE.is_match(self.text)
             {
-               self.process_byte_string()
+               Some(self.process_byte_string())
             }
-*/
             else if let Some((_, end)) = ID_RE.find(self.text)
             {
                self.process_identifier(end)
@@ -299,7 +297,7 @@ impl <'a> InternalLexer<'a>
    }
 
    fn process_string(&mut self)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       let (_, end) = STRING_PREFIX_RE.find(self.text).unwrap();
       let caps = STRING_PREFIX_RE.captures(self.text).unwrap();
@@ -308,24 +306,18 @@ impl <'a> InternalLexer<'a>
 
       self.update_text(end);
 
-      let (re, fail, err) = match quote
-      {
-         "'" => (&*STRING_SINGLE_QUOTE_RE, &*STRING_FAIL_RE,
-                  LexerError::UnterminatedString),
-         "'''" => (&*STRING_TRIPLE_SINGLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
-                  LexerError::UnterminatedTripleString),
-         "\"" => (&*STRING_DOUBLE_QUOTE_RE, &*STRING_FAIL_RE,
-                  LexerError::UnterminatedString),
-         "\"\"\"" => (&*STRING_TRIPLE_DOUBLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
-                  LexerError::UnterminatedTripleString),
-         _ => unreachable!(),
-      };
+      let (re, fail, err) = determine_string_processing(quote);
 
       match re.find(self.text)
       {
          Some((_, end)) =>
          {
-            self.build_string_contents(end, re, raw)
+            // check_escape_errors also iterates over structurally valid
+            // named unicode characters - duplicating the some of
+            // the iteration done below in replace_all - this is
+            // kept separate for code clarity, but can be merged if needed
+            self.build_string_contents(end, re, raw,
+               |_| None, check_escape_errors, process_escape_sequence)
          },
          None =>
          {
@@ -334,44 +326,85 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn build_string_contents(&mut self, end: usize, re: &Regex, raw: bool)
-      -> Option<(usize, ResultToken)>
+   fn build_string_contents<VF, CF, PF>(&mut self, end: usize, re: &Regex,
+      raw: bool, verify_contents: VF, check_escapes: CF, process_escape: PF)
+      -> (usize, ResultToken)
+      where VF: Fn(&str) -> Option<LexerError>,
+            CF: Fn(&str) -> Option<LexerError>,
+            PF: Fn(&str) -> String
    {
       let caps = re.captures(self.text).unwrap();
       let contents = caps.at(1).unwrap_or("");
       let newlines = NEWLINE_RE.find_iter(&contents).count();
+
+      let current_line_number = self.line_number;
+      self.update_text(end);
+      self.line_number += newlines;
+
+      if let Some(err) = verify_contents(contents)
+      {
+         return (current_line_number, Err(err));
+      }
+
       let expanded =
          if !raw
          {
-            if let Some(err) = check_escape_errors(contents)
+            if let Some(err) = check_escapes(contents)
             {
-               // this check also iterates over structurally valid
-               // named unicode characters - duplicating the some of
-               // the iteration done below in replace_all - this is
-               // kept separate for code clarity, but can be merged if needed
-               return Some((self.line_number, Err(err)))
+               return (current_line_number, Err(err))
             }
             ESCAPES_RE.replace_all(contents, |caps: &Captures|
-               process_escape_sequence(caps.at(1).unwrap_or("")))
+               process_escape(caps.at(1).unwrap_or("")))
          }
          else
          {
             contents.to_owned()
          };
-      self.update_text(end);
-      self.line_number += newlines;
-      Some((self.line_number - newlines, Ok(Token::String(expanded))))
+      (current_line_number, Ok(Token::String(expanded)))
    }
 
    fn handle_string_err(&mut self, fail: &Regex, err: LexerError)
-      -> Option<(usize, ResultToken)>
+      -> (usize, ResultToken)
    {
       let (_, end) = fail.find(self.text).unwrap();
       let newlines = NEWLINE_RE.find_iter(&self.text[..end]).count();
       self.update_text(end);
       self.line_number += newlines;
-      Some((self.line_number, Err(err)))
+      (self.line_number, Err(err))
    }
+
+   fn process_byte_string(&mut self)
+      -> (usize, ResultToken)
+   {
+      let (_, end) = BYTES_PREFIX_RE.find(self.text).unwrap();
+      let caps = BYTES_PREFIX_RE.captures(self.text).unwrap();
+      let raw = caps.at(1).is_some() || caps.at(2).is_some();
+      let quote = caps.at(3).unwrap();
+
+      self.update_text(end);
+
+      let (re, fail, err) = determine_string_processing(quote);
+
+      match re.find(self.text)
+      {
+         Some((_, end)) =>
+         {
+            match self.build_string_contents(end, re, raw,
+               verify_ascii, check_byte_escape_errors,
+               process_byte_escape_sequence)
+            {
+               (n, Ok(Token::String(s))) =>
+                  (n, Ok(Token::Bytes(s.into_bytes()))),
+               other => other,
+            }
+         },
+         None =>
+         {
+            self.handle_string_err(fail, err)
+         },
+      }
+   }
+
 /*
    fn process_string(&mut self, mut line: Line<'a>)
       -> (Option<(usize, ResultToken)>, Option<Line<'a>>)
@@ -990,6 +1023,23 @@ impl <'a> InternalLexer<'a>
    }
 }
 
+fn determine_string_processing(quote: &str)
+   -> (&Regex, &Regex, LexerError)
+{
+   match quote
+   {
+      "'" => (&*STRING_SINGLE_QUOTE_RE, &*STRING_FAIL_RE,
+               LexerError::UnterminatedString),
+      "'''" => (&*STRING_TRIPLE_SINGLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
+               LexerError::UnterminatedTripleString),
+      "\"" => (&*STRING_DOUBLE_QUOTE_RE, &*STRING_FAIL_RE,
+               LexerError::UnterminatedString),
+      "\"\"\"" => (&*STRING_TRIPLE_DOUBLE_QUOTE_RE, &*STRING_TRIPLE_FAIL_RE,
+               LexerError::UnterminatedTripleString),
+      _ => unreachable!(),
+   }
+}
+
 fn process_escape_sequence(escaped: &str)
    -> String
 {
@@ -1092,6 +1142,72 @@ fn check_named_escape_errors(caps: FindCaptures)
       }
    }
    None
+}
+
+fn verify_ascii(contents: &str)
+   -> Option<LexerError>
+{
+   if NON_ASCII_RE.is_match(contents)
+   {
+      Some(LexerError::BytesNonASCII)
+   }
+   else
+   {
+      None
+   }
+}
+
+fn check_byte_escape_errors(s: &str)
+   -> Option<LexerError>
+{
+   let caps = ESCAPES_BYTES_FAIL_RE.captures(s);
+   if caps.is_none() { return None; }
+   let caps = caps.unwrap();
+
+   if let Some(_) = caps.name("badx")
+   {
+      Some(LexerError::HexEscapeShort)
+   }
+   else
+   {
+      None
+   }
+}
+
+fn process_byte_escape_sequence(escaped: &str)
+   -> String
+{
+   match escaped
+   {
+      "\n" | "\r" | "\r\n" => "".to_owned(),
+      "\\" => "\\".to_owned(),
+      "'" => "'".to_owned(),
+      "\"" => "\"".to_owned(),
+      "a" => "\x07".to_owned(),
+      "b" => "\x08".to_owned(),
+      "f" => "\x0C".to_owned(),
+      "n" => "\n".to_owned(),
+      "r" => "\r".to_owned(),
+      "t" => "\t".to_owned(),
+      "v" => "\x0B".to_owned(),
+      escaped =>
+      {
+         if OCT_ESCAPE_RE.is_match(escaped)
+         {
+            char::from_u32(u32::from_str_radix(escaped, 8)
+               .unwrap()).unwrap().to_string()
+         }
+         else if HEX_ESCAPE_RE.is_match(escaped)
+         {
+            char::from_u32(u32::from_str_radix(&escaped[1..], 16)
+               .unwrap()).unwrap().to_string()
+         }
+         else
+         {
+            "\\".to_owned() + escaped
+         }
+      },
+   }
 }
 
 /*
@@ -1386,8 +1502,6 @@ lazy_static!
       ").unwrap();
    static ref STRING_START_RE : Regex =
       Regex::new(r#"^(?:[uU]|[rR])?['"]"#).unwrap();
-   static ref BYTES_START_RE : Regex =
-      Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
    static ref STRING_PREFIX_RE : Regex =
       Regex::new(r#"^(?:[uU]|([rR]))?('''|'|"""|")"#).unwrap();
    static ref STRING_SINGLE_QUOTE_RE : Regex =
@@ -1424,6 +1538,16 @@ lazy_static!      // Recursion limit reached above o.O
          |(?P<start>N(?:[^\{]|$))                        # missing start brace
          |(?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))        # too few digits
       )"#).unwrap();
+   static ref BYTES_START_RE : Regex =
+      Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
+   static ref BYTES_PREFIX_RE : Regex =
+      Regex::new(r#"^(?:[bB]([rR]?)|([rR])[bB])('''|'|"""|")"#).unwrap();
+   static ref NON_ASCII_RE : Regex =
+      Regex::new(r"[:^ascii:]").unwrap();
+   static ref ESCAPES_BYTES_FAIL_RE : Regex =
+      Regex::new(r#"(?x)\\
+         (?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))        # too few digits
+      "#).unwrap();
 }
 
 /*
@@ -1885,9 +2009,10 @@ mod tests
    #[test]
    fn test_strings_23()
    {
-      let chars = "'\\N{monkey}\\x'";
+      let chars = "'\\N{monkey}\\x\\\n'a";
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Identifier("a".to_owned())))));
    }
 
    #[test]
@@ -1898,7 +2023,6 @@ mod tests
       assert_eq!(l.next(), Some((1, Err(LexerError::MalformedNamedUnicodeEscape))));
    }
 
-/*
    #[test]
    fn test_byte_strings_1()
    {
@@ -1962,7 +2086,39 @@ mod tests
       let mut l = Lexer::new(chars);
       assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![97, 98, 99, 92, 39, 32, 92, 10, 32, 32, 9, 32, 49, 50, 51])))));
    }
-*/
+
+   #[test]
+   fn test_byte_strings_9()
+   {
+      let chars = "b'\\x'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
+   }
+
+   #[test]
+   fn test_byte_strings_10()
+   {
+      let chars = "b'\\x7'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::HexEscapeShort))));
+   }
+
+   #[test]
+   fn test_byte_strings_11()
+   {
+      let chars = "b'\\N{monkey}'";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Ok(Token::Bytes(vec![92, 78, 123, 109, 111, 110, 107, 101, 121, 125])))));
+   }
+
+   #[test]
+   fn test_byte_strings_12()
+   {
+      let chars = "b'abdafe ef a efw fw🐒feafe f \\\nwf we fw'\n";
+      let mut l = Lexer::new(chars);
+      assert_eq!(l.next(), Some((1, Err(LexerError::BytesNonASCII))));
+      assert_eq!(l.next(), Some((2, Ok(Token::Newline))));
+   }
 
    #[test]
    fn test_implicit_1()
