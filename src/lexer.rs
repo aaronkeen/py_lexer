@@ -9,6 +9,7 @@ use iter::MultiPeekable;
 
 use regex::{Regex, Captures, FindCaptures};
 use std::cmp;
+use std::io::Write;
 use std::iter::Peekable;
 use tokens::{Token, keyword_lookup, symbol_lookup};
 use errors::LexerError;
@@ -312,12 +313,7 @@ impl <'a> InternalLexer<'a>
       {
          Some((_, end)) =>
          {
-            // check_escape_errors also iterates over structurally valid
-            // named unicode characters - duplicating the some of
-            // the iteration done below in replace_all - this is
-            // kept separate for code clarity, but can be merged if needed
-            self.build_string_contents(end, re, raw,
-               |_| None, check_escape_errors, process_escape_sequence)
+            self.build_string_contents(end, re, raw)
          },
          None =>
          {
@@ -326,12 +322,8 @@ impl <'a> InternalLexer<'a>
       }
    }
 
-   fn build_string_contents<VF, CF, PF>(&mut self, end: usize, re: &Regex,
-      raw: bool, verify_contents: VF, check_escapes: CF, process_escape: PF)
+   fn build_string_contents(&mut self, end: usize, re: &Regex, raw: bool)
       -> (usize, ResultToken)
-      where VF: Fn(&str) -> Option<LexerError>,
-            CF: Fn(&str) -> Option<LexerError>,
-            PF: Fn(&str) -> String
    {
       let caps = re.captures(self.text).unwrap();
       let contents = caps.at(1).unwrap_or("");
@@ -341,26 +333,58 @@ impl <'a> InternalLexer<'a>
       self.update_text(end);
       self.line_number += newlines;
 
-      if let Some(err) = verify_contents(contents)
-      {
-         return (current_line_number, Err(err));
-      }
-
       let expanded =
          if !raw
          {
-            if let Some(err) = check_escapes(contents)
+            if let Some(err) = check_escape_errors(contents)
             {
                return (current_line_number, Err(err))
             }
+            // check_escape_errors also iterates over structurally valid
+            // named unicode characters - duplicating some of
+            // the iteration done below in replace_all - this is
+            // kept separate for code clarity, but could be merged
             ESCAPES_RE.replace_all(contents, |caps: &Captures|
-               process_escape(caps.at(1).unwrap_or("")))
+               process_escape_sequence(caps.at(1).unwrap_or("")))
          }
          else
          {
             contents.to_owned()
          };
       (current_line_number, Ok(Token::String(expanded)))
+   }
+
+   fn build_bytes_contents(&mut self, end: usize, re: &Regex, raw: bool)
+      -> (usize, ResultToken)
+   {
+      let caps = re.captures(self.text).unwrap();
+      let contents = caps.at(1).unwrap_or("");
+      let newlines = NEWLINE_RE.find_iter(&contents).count();
+
+      let current_line_number = self.line_number;
+      self.update_text(end);
+      self.line_number += newlines;
+
+      if NON_ASCII_RE.is_match(contents)
+      {
+         return (current_line_number, Err(LexerError::BytesNonASCII));
+      }
+
+      let expanded =
+         if !raw
+         {
+            if let Some(err) = check_byte_escape_errors(contents)
+            {
+               return (current_line_number, Err(err))
+            }
+            replace_string_bytes(&ESCAPES_BYTES_RE, contents, |caps: &Captures|
+               process_byte_escape_sequence(caps.at(1).unwrap_or("")))
+         }
+         else
+         {
+            contents.as_bytes().to_vec()
+         };
+      (current_line_number, Ok(Token::Bytes(expanded)))
    }
 
    fn handle_string_err(&mut self, fail: &Regex, err: LexerError)
@@ -381,6 +405,8 @@ impl <'a> InternalLexer<'a>
       let raw = caps.at(1).is_some() || caps.at(2).is_some();
       let quote = caps.at(3).unwrap();
 
+      println!("is raw: {} '{}' '{}'", raw, caps.at(1).unwrap_or(""),
+         caps.at(2).unwrap_or(""));
       self.update_text(end);
 
       let (re, fail, err) = determine_string_processing(quote);
@@ -389,14 +415,7 @@ impl <'a> InternalLexer<'a>
       {
          Some((_, end)) =>
          {
-            match self.build_string_contents(end, re, raw,
-               verify_ascii, check_byte_escape_errors,
-               process_byte_escape_sequence)
-            {
-               (n, Ok(Token::String(s))) =>
-                  (n, Ok(Token::Bytes(s.into_bytes()))),
-               other => other,
-            }
+            self.build_bytes_contents(end, re, raw)
          },
          None =>
          {
@@ -1023,6 +1042,27 @@ impl <'a> InternalLexer<'a>
    }
 }
 
+fn replace_string_bytes<F>(re: &Regex, contents: &str, process: F)
+   -> Vec<u8>
+   where F: Fn(&Captures) -> Vec<u8>
+{
+   let mut bytes = vec![];
+   let mut pos = 0;
+
+   for (start, end) in re.find_iter(contents)
+   {
+      push_all(&mut bytes, contents[pos..start].as_bytes());
+      if let Some(caps) = re.captures(&contents[start..end])
+      {
+         bytes.append(&mut process(&caps));
+      }
+      pos = end;
+   }
+   push_all(&mut bytes, contents[pos..].as_bytes());
+
+   bytes
+}
+
 fn determine_string_processing(quote: &str)
    -> (&Regex, &Regex, LexerError)
 {
@@ -1144,19 +1184,6 @@ fn check_named_escape_errors(caps: FindCaptures)
    None
 }
 
-fn verify_ascii(contents: &str)
-   -> Option<LexerError>
-{
-   if NON_ASCII_RE.is_match(contents)
-   {
-      Some(LexerError::BytesNonASCII)
-   }
-   else
-   {
-      None
-   }
-}
-
 fn check_byte_escape_errors(s: &str)
    -> Option<LexerError>
 {
@@ -1175,38 +1202,47 @@ fn check_byte_escape_errors(s: &str)
 }
 
 fn process_byte_escape_sequence(escaped: &str)
-   -> String
+   -> Vec<u8>
 {
    match escaped
    {
-      "\n" | "\r" | "\r\n" => "".to_owned(),
-      "\\" => "\\".to_owned(),
-      "'" => "'".to_owned(),
-      "\"" => "\"".to_owned(),
-      "a" => "\x07".to_owned(),
-      "b" => "\x08".to_owned(),
-      "f" => "\x0C".to_owned(),
-      "n" => "\n".to_owned(),
-      "r" => "\r".to_owned(),
-      "t" => "\t".to_owned(),
-      "v" => "\x0B".to_owned(),
+      "\n" | "\r" | "\r\n" => vec![],
+      "\\" => vec!['\\' as u8], 
+      "'" => vec!['\'' as u8],
+      "\"" => vec!['"' as u8],
+      "a" => vec!['\x07' as u8],
+      "b" => vec!['\x08' as u8],
+      "f" => vec!['\x0C' as u8],
+      "n" => vec!['\n' as u8],
+      "r" => vec!['\r' as u8],
+      "t" => vec!['\t' as u8],
+      "v" => vec!['\x0B' as u8],
       escaped =>
       {
          if OCT_ESCAPE_RE.is_match(escaped)
          {
-            char::from_u32(u32::from_str_radix(escaped, 8)
-               .unwrap()).unwrap().to_string()
+            vec![u32::from_str_radix(escaped, 8).unwrap() as u8]
          }
          else if HEX_ESCAPE_RE.is_match(escaped)
          {
-            char::from_u32(u32::from_str_radix(&escaped[1..], 16)
-               .unwrap()).unwrap().to_string()
+            vec![u32::from_str_radix(&escaped[1..], 16).unwrap() as u8]
          }
          else
          {
-            "\\".to_owned() + escaped
+            let mut result = vec!['\\' as u8];
+            push_all(&mut result, escaped.as_bytes());
+            result
          }
       },
+   }
+}
+
+// Temporary replacement for unstable 
+fn push_all(dest: &mut Vec<u8>, src: &[u8])
+{
+   for &v in src
+   {
+      dest.push(v)
    }
 }
 
@@ -1541,9 +1577,11 @@ lazy_static!      // Recursion limit reached above o.O
    static ref BYTES_START_RE : Regex =
       Regex::new(r#"^[bB][rR]?['"]|^[rR][bB]['"]"#).unwrap();
    static ref BYTES_PREFIX_RE : Regex =
-      Regex::new(r#"^(?:[bB]([rR]?)|([rR])[bB])('''|'|"""|")"#).unwrap();
+      Regex::new(r#"^(?:[bB]([rR])?|([rR])[bB])('''|'|"""|")"#).unwrap();
    static ref NON_ASCII_RE : Regex =
       Regex::new(r"[:^ascii:]").unwrap();
+   static ref ESCAPES_BYTES_RE : Regex =
+      Regex::new(r#"\\(\r\n|\r|\n|\\|'|"|a|b|f|n|r|t|v|[0-7]{1,3}|x[:xdigit:]{2})"#).unwrap();
    static ref ESCAPES_BYTES_FAIL_RE : Regex =
       Regex::new(r#"(?x)\\
          (?P<badx>x[:xdigit:]?(?:[:^xdigit:]|$))        # too few digits
